@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "179331473264",
+    "project_id": "phone-soil",
+    "storage_bucket": "phone-soil.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:179331473264:android:abebc76eadb9688397b9b5",
+        "android_client_info": {
+          "package_name": "com.soil.sensor.soil_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDc2qAJZvE_2zLMJcTrAl10I_ZbgbOAegM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
