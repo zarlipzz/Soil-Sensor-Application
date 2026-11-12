@@ -21,8 +21,9 @@ class SensorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -33,7 +34,7 @@ class SensorCard extends StatelessWidget {
                   child: Text(
                     title,
                     style: const TextStyle(
-                      fontSize: 12.5,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF475569),
                     ),
@@ -41,21 +42,26 @@ class SensorCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Icon(icon, color: color, size: 20),
+                Icon(icon, color: color, size: 16),
               ],
             ),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: color,
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
             ),
             Text(
               subtext,
               style: const TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 color: Color(0xFF64748B),
               ),
               maxLines: 1,

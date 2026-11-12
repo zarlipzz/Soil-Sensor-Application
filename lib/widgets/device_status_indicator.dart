@@ -49,9 +49,9 @@ class DeviceStatusIndicator extends StatelessWidget {
                       ? Icons.usb_rounded
                       : Icons.usb_off_rounded),
               color: statusColor,
-              size: 26,
+              size: 22,
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -61,20 +61,20 @@ class DeviceStatusIndicator extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: statusColor,
-                      fontSize: 14,
+                      fontSize: 13,
                     ),
                   ),
                   Text(
                     'อัปเดตล่าสุด: ${_formatTime(lastUpdated)}',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    style: const TextStyle(fontSize: 11, color: Colors.black54),
                   ),
                 ],
               ),
             ),
             if (isCloudSyncing)
               const SizedBox(
-                width: 20,
-                height: 20,
+                width: 18,
+                height: 18,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   valueColor: AlwaysStoppedAnimation<Color>(AppColors.softBlue),
@@ -86,7 +86,7 @@ class DeviceStatusIndicator extends StatelessWidget {
                 child: Icon(
                   Icons.cloud_done_rounded,
                   color: AppColors.softBlue,
-                  size: 22,
+                  size: 20,
                 ),
               ),
           ],
@@ -94,9 +94,9 @@ class DeviceStatusIndicator extends StatelessWidget {
 
         // GPS status chip bar
         if (gpsLocation != null || gpsStatus != GpsStatus.unknown) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             decoration: BoxDecoration(
               color: AppColors.lightBlueTint,
               borderRadius: BorderRadius.circular(8),
@@ -105,17 +105,17 @@ class DeviceStatusIndicator extends StatelessWidget {
               children: [
                 const Icon(
                   Icons.location_on_outlined,
-                  size: 16,
+                  size: 14,
                   color: AppColors.softBlue,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     gpsLocation != null
                         ? 'GPS: ${gpsLocation!.latitude.toStringAsFixed(5)}, ${gpsLocation!.longitude.toStringAsFixed(5)} (±${gpsLocation!.accuracy.toStringAsFixed(0)}m)'
                         : 'GPS: กำลังค้นหาสัญญาณตำแหน่ง...',
                     style: const TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w500,
                       color: AppColors.statusDarkText,
                     ),
@@ -124,8 +124,8 @@ class DeviceStatusIndicator extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  width: 8,
-                  height: 8,
+                  width: 7,
+                  height: 7,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: gpsLocation != null ? Colors.green : Colors.amber,

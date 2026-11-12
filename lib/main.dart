@@ -46,10 +46,16 @@ class SoilSensorApp extends StatelessWidget {
         ),
         cardTheme: CardThemeData(
           color: Colors.white,
-          elevation: 1.5,
-          shadowColor: Colors.black.withValues(alpha: 0.08),
+          elevation: 1.0,
+          shadowColor: Colors.black12,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
           ),
         ),
       ),
