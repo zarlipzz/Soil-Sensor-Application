@@ -35,6 +35,7 @@ dependencies:
   usb_serial:
     path: packages/usb_serial
   firebase_core: ^5.1.0
+  package_info_plus: ^10.2.2
   cloud_firestore: ^7.1.0
   shared_preferences: ^2.5.6
   geolocator: ^14.1.1

@@ -1,11 +1,12 @@
-// Dashboard screen — responsive for Samsung Galaxy Tab A9
+﻿// Dashboard screen โ€” responsive for Samsung Galaxy Tab A9
 import '../widgets/sensor_card.dart';
-import 'dart:async';
 import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/soil_measurement.dart';
 import '../models/measurement_source.dart';
@@ -35,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ----- State variables -----
   List<SoilMeasurement> _localLogs = [];
+  int _seenLogCount = 0;
   SoilMeasurement _currentData = SoilMeasurement.initial();
   bool _hasFreshData = false;
   bool _isSaving = false;
@@ -47,9 +49,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _lastSavedMeasurementId;
   MeasurementSource _currentSource = MeasurementSource.simulation;
   GpsLocationData? _currentGpsLocation;
+  StreamSubscription<Position>? _gpsPositionSubscription;
 
   // ---------- Location Grouping ----------
-  static const double _groupRadiusMeters = 20.0;
+  static const double _groupRadiusMeters = 15.0;
   List<LocationGroup> _locationGroups = [];
 
   @override
@@ -85,7 +88,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     };
 
-    // Packet callback – only called after Modbus validation in USB service
+    // Packet callback โ€“ only called after Modbus validation in USB service
     _usbService.onPacketReceived = (Uint8List packet) async {
       final gps = await _gpsService.getCurrentLocation();
       final measurement = SoilMeasurement.fromRawBytes(
@@ -108,13 +111,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // Initialise USB detection and GPS
     _usbService.initialize();
-    _gpsService.getCurrentLocation().then((loc) {
-      if (mounted) setState(() => _currentGpsLocation = loc);
+    _startGpsTracking();
+  }
+
+  Future<void> _startGpsTracking() async {
+    final enabled = await _gpsService.isLocationServiceEnabled();
+    if (!enabled || !await _gpsService.requestPermission()) return;
+    final loc = await _gpsService.getCurrentLocation();
+    if (mounted && loc != null) setState(() => _currentGpsLocation = loc);
+    _gpsPositionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 1),
+    ).listen((position) {
+      if (!mounted) return;
+      setState(() => _currentGpsLocation = GpsLocationData(latitude: position.latitude, longitude: position.longitude, accuracy: position.accuracy, timestamp: position.timestamp));
     });
   }
 
   @override
   void dispose() {
+    _gpsPositionSubscription?.cancel();
     _usbService.dispose();
     super.dispose();
   }
@@ -137,7 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _isCloudSyncing = false;
         });
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('☁️ บันทึกลงเครื่องและซิงค์ขึ้น Firebase เรียบร้อย!'),
+          content: Text('บันทึกลงเครื่องและซิงก์ขึ้น Firebase เรียบร้อย!'),
           duration: Duration(seconds: 2),
           backgroundColor: AppColors.softBlue,
         ));
@@ -160,10 +175,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) setState(() => _currentGpsLocation = gps);
 
     if (_usbStatus == UsbConnectionStatus.connected) {
-      // Physical read – USB service will emit a validated packet
+      // Physical read โ€“ USB service will emit a validated packet
       await _usbService.sendQuery();
     } else {
-      // Simulation mode – do NOT mark data as fresh for saving
+      // Simulation mode โ€“ do NOT mark data as fresh for saving
       final now = DateTime.now();
       final simulated = SoilMeasurement(
         id: 'SIM-${now.millisecondsSinceEpoch}',
@@ -221,6 +236,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Local Logs Modal ----------
   void _openLocalLogsView() {
+    setState(() => _seenLogCount = _localLogs.length);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -242,7 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const Icon(Icons.history_rounded, color: AppColors.softBlue),
                   const SizedBox(width: 8),
-                  Text('Local Logs (${_localLogs.length} รายการ)',
+                  Text('บันทึกในเครื่อง (${_localLogs.length} รายการ)',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ],
               ),
@@ -261,7 +277,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           leading: const Icon(Icons.eco_rounded, color: AppColors.softBlue, size: 20),
                           title: Text('${m.timestamp.day}/${m.timestamp.month}/${m.timestamp.year} ${_formatTime(m.timestamp)}',
                               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          subtitle: Text('T: ${m.temperature.toStringAsFixed(1)}°C  pH: ${m.ph.toStringAsFixed(2)}  EC: ${m.ec}µS',
+                          subtitle: Text('ความชื้น: ${m.moisture.toStringAsFixed(1)}%  อุณหภูมิ: ${m.temperature.toStringAsFixed(1)} °C',
                               style: const TextStyle(fontSize: 11)),
                           trailing: m.isSyncedToCloud
                               ? const Icon(Icons.cloud_done_rounded, color: AppColors.softBlue, size: 18)
@@ -291,7 +307,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 4),
           Expanded(
             child: Text(
-              'GPS: ${_currentGpsLocation!.latitude.toStringAsFixed(5)}, ${_currentGpsLocation!.longitude.toStringAsFixed(5)} (±${_currentGpsLocation!.accuracy.toStringAsFixed(0)}m)',
+              'GPS: ${_currentGpsLocation!.latitude.toStringAsFixed(5)}, ${_currentGpsLocation!.longitude.toStringAsFixed(5)} (ยฑ${_currentGpsLocation!.accuracy.toStringAsFixed(0)}m)',
               style: const TextStyle(fontSize: 10, color: AppColors.statusDarkText),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -311,6 +327,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final center = (_currentGpsLocation != null)
         ? LatLng(_currentGpsLocation!.latitude, _currentGpsLocation!.longitude)
         : const LatLng(13.75, 100.52); // Bangkok default
+    final validLogs = _localLogs
+        .where((m) => m.latitude != null && m.longitude != null && m.latitude!.isFinite && m.longitude!.isFinite)
+        .toList();
+    final groups = <({LatLng center, List<SoilMeasurement> logs})>[];
+    for (final log in validLogs) {
+      final point = LatLng(log.latitude!, log.longitude!);
+      final i = groups.indexWhere((g) => const Distance().as(LengthUnit.Meter, g.center, point) <= _groupRadiusMeters);
+      if (i == -1) { groups.add((center: point, logs: [log])); } else { groups[i].logs.add(log); }
+    }
+    final savedMarkers = groups.map((group) => Marker(
+              point: group.center,
+              width: 30,
+              height: 36,
+              child: GestureDetector(
+                onTap: () => _showMeasurementGroupOnMap(group.logs),
+                child: const Icon(Icons.location_on, color: Colors.green, size: 30),
+              ),
+            ))
+        .toList();
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: FlutterMap(
@@ -330,7 +365,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: const Icon(Icons.location_pin, color: Colors.red, size: 32),
               ),
             ]),
+          MarkerLayer(markers: savedMarkers),
         ],
+      ),
+    );
+  }
+
+  void _showMeasurementGroupOnMap(List<SoilMeasurement> measurements) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.45,
+        maxChildSize: 0.9,
+        builder: (ctx, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text('ข้อมูลหมุด ${measurements.length} รายการ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            const Divider(),
+            ...measurements.reversed.map((m) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('${m.timestamp}'),
+              subtitle: Text('ความชื้น ${m.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${m.temperature.toStringAsFixed(1)} °C\nEC ${m.ec} µS/cm · Salinity ${m.salinity} mg/L · N ${m.nitrogen} · P ${m.phosphorus} · K ${m.potassium} · pH ${m.ph.toStringAsFixed(2)}'),
+            )),
+          ],
+        ),
       ),
     );
   }
@@ -390,14 +451,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       mainAxisSpacing: 6,
       childAspectRatio: aspectRatio,
       children: [
-        SensorCard(title: 'ความชื้น', value: '${_currentData.moisture.toStringAsFixed(1)} %', icon: Icons.water_drop_rounded, color: AppColors.moistureColor, subtext: 'Optimal: 15–35%'),
-        SensorCard(title: 'อุณหภูมิ', value: '${_currentData.temperature.toStringAsFixed(1)} °C', icon: Icons.thermostat_rounded, color: AppColors.tempColor, subtext: 'Normal: 20–30°C'),
-        SensorCard(title: 'pH', value: _currentData.ph.toStringAsFixed(2), icon: Icons.science_rounded, color: AppColors.phColor, subtext: 'Neutral: 6.5–7.5'),
-        SensorCard(title: 'EC', value: '${_currentData.ec} µS/cm', icon: Icons.bolt_rounded, color: AppColors.ecColor, subtext: 'Normal: 100–1000'),
+        SensorCard(title: 'ความชื้น', value: '${_currentData.moisture.toStringAsFixed(1)} %', icon: Icons.water_drop_rounded, color: AppColors.moistureColor, subtext: 'เหมาะสม: 15–35%'),
+        SensorCard(title: 'อุณหภูมิ', value: '${_currentData.temperature.toStringAsFixed(1)} °C', icon: Icons.thermostat_rounded, color: AppColors.tempColor, subtext: 'ปกติ: 20–30 °C'),
+        SensorCard(title: 'pH', value: _currentData.ph.toStringAsFixed(2), icon: Icons.science_rounded, color: AppColors.phColor, subtext: 'Neutral: 6.5โ€“7.5'),
+        SensorCard(title: 'EC', value: '${_currentData.ec} µS/cm', icon: Icons.bolt_rounded, color: AppColors.ecColor, subtext: 'ปกติ: 100–1000'),
         SensorCard(title: 'ไนโตรเจน', value: '${_currentData.nitrogen} mg/kg', icon: Icons.grass_rounded, color: AppColors.nitrogenColor, subtext: 'Available N'),
         SensorCard(title: 'ฟอสฟอรัส', value: '${_currentData.phosphorus} mg/kg', icon: Icons.grain_rounded, color: AppColors.phosphorusColor, subtext: 'Available P'),
         SensorCard(title: 'โพแทสเซียม', value: '${_currentData.potassium} mg/kg', icon: Icons.spa_rounded, color: AppColors.potassiumColor, subtext: 'Available K'),
-        SensorCard(title: 'ความเค็ม', value: '${_currentData.salinity} mg/L', icon: Icons.waves_rounded, color: AppColors.salinityColor, subtext: 'Std: <800 mg/L'),
+        SensorCard(title: 'ความเค็ม', value: '${_currentData.salinity} mg/L', icon: Icons.waves_rounded, color: AppColors.salinityColor, subtext: 'มาตรฐาน: <800 mg/L'),
       ],
     );
   }
@@ -444,7 +505,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 tooltip: 'Local Logs',
                 onPressed: _openLocalLogsView,
               ),
-              if (_localLogs.isNotEmpty)
+              if (_localLogs.length > _seenLogCount)
                 Positioned(
                   top: 8,
                   right: 8,
@@ -457,7 +518,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     child: Center(
                       child: Text(
-                        _localLogs.length > 99 ? '99+' : '${_localLogs.length}',
+                        (_localLogs.length - _seenLogCount) > 99 ? '99+' : '${_localLogs.length - _seenLogCount}',
                         style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -476,14 +537,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ============================================================
-  // PORTRAIT — Map top 45%, buttons middle, 8 cards bottom 50%
+  // PORTRAIT โ€” Map top 45%, buttons middle, 8 cards bottom 50%
   // ============================================================
   Widget _buildPortrait(Size size) {
     // Available height after AppBar + SafeArea (approximate)
     // Map: flex 9, buttons+gps: fixed, grid: flex 10
     return Column(
       children: [
-        // MAP — top ~45%
+        // MAP โ€” top ~45%
         Expanded(
           flex: 9,
           child: Padding(
@@ -492,7 +553,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
 
-        // GPS bar + Action buttons — compact middle strip
+        // GPS bar + Action buttons โ€” compact middle strip
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Column(
@@ -505,14 +566,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
 
-        // SENSOR GRID — bottom ~50%, 2 columns × 4 rows, no scroll
+        // SENSOR GRID โ€” bottom ~50%, 2 columns ร— 4 rows, no scroll
         Expanded(
           flex: 10,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
             child: LayoutBuilder(
               builder: (ctx, bc) {
-                // 2 cols, 4 rows, 6px gap × 3 rows = 18, padding consumed
+                // 2 cols, 4 rows, 6px gap ร— 3 rows = 18, padding consumed
                 final cardH = (bc.maxHeight - 18) / 4;
                 final cardW = (bc.maxWidth - 6) / 2;
                 final ratio = cardW / cardH;
@@ -526,7 +587,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ============================================================
-  // LANDSCAPE — Map left 50%, right: buttons top + 8 cards
+  // LANDSCAPE โ€” Map left 50%, right: buttons top + 8 cards
   // ============================================================
   Widget _buildLandscape(Size size) {
     return Padding(
@@ -542,7 +603,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           const SizedBox(width: 8),
 
-          // RIGHT: GPS + buttons + 4×2 grid
+          // RIGHT: GPS + buttons + 4ร—2 grid
           Expanded(
             flex: 1,
             child: Column(
@@ -552,7 +613,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 4),
                 _buildActionButtons(compact: true),
                 const SizedBox(height: 6),
-                // Grid fills remaining space — 4 cols × 2 rows, equal cells
+                // Grid fills remaining space โ€” 4 cols ร— 2 rows, equal cells
                 Expanded(
                   child: LayoutBuilder(
                     builder: (ctx, bc) {
