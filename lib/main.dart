@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
+
 import 'screens/dashboard_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/map_screen.dart';
@@ -8,16 +7,6 @@ import 'utils/app_constants.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    debugPrint('Firebase initialized successfully.');
-  } catch (e) {
-    debugPrint('Firebase initialization warning: $e');
-  }
-
   runApp(const SoilSensorApp());
 }
 
@@ -55,7 +44,10 @@ class SoilSensorApp extends StatelessWidget {
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       ),
@@ -63,10 +55,8 @@ class SoilSensorApp extends StatelessWidget {
       routes: {
         '/': (context) => const DashboardScreen(),
         '/map': (context) => const MapScreen(),
-        '/history': (context) => HistoryScreen(
-              logs: const [],
-              onClearLogs: () {},
-            ),
+        '/history': (context) =>
+            HistoryScreen(logs: const [], onClearLogs: () {}),
       },
     );
   }

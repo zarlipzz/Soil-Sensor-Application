@@ -5,10 +5,16 @@ class AppColors {
   AppColors._();
 
   // Primary green palette
-  static const Color softBlue = Color(0xFF4CAF7D);         // primary green (replaces softBlue)
-  static const Color appbarBlue = Color(0xFF388E5A);       // darker green appbar
-  static const Color softGreyBackground = Color(0xFFF1F8F4); // very light greenish bg
-  static const Color lightBlueTint = Color(0xFFE0F2EA);    // light green tint for chips
+  static const Color softBlue = Color(
+    0xFF4CAF7D,
+  ); // primary green (replaces softBlue)
+  static const Color appbarBlue = Color(0xFF388E5A); // darker green appbar
+  static const Color softGreyBackground = Color(
+    0xFFF1F8F4,
+  ); // very light greenish bg
+  static const Color lightBlueTint = Color(
+    0xFFE0F2EA,
+  ); // light green tint for chips
 
   // Status & accent colors
   static const Color statusConnected = Color(0xFF2E7D52);
@@ -32,8 +38,8 @@ class AppConstants {
   AppConstants._();
 
   static const String appTitle = 'Soil Multi-Parameter Monitor';
-  static const String appSubtitle = 'CH340 USB Modbus RTU + Local Log & Cloud';
-
+  static const String appSubtitle =
+      'CH340 USB Modbus RTU + Local Log & Home Assistant';
 
   // Local storage keys
   static const String prefKeyLocationGroups = 'soil_location_groups_v1';
@@ -41,8 +47,6 @@ class AppConstants {
   static const String prefKeyLocalLogs = 'soil_local_logs_v1';
   static const int maxLocalLogs = 200;
 
-  // Cloud Firestore collection
-  static const String firestoreCollection = 'soil_measurements';
   static const String defaultDeviceId = 'CH340-SOIL-01';
 
   // Hardware constants
@@ -50,4 +54,3 @@ class AppConstants {
   static const int baudRate = 9600;
   static const Duration autoReadInterval = Duration(minutes: 1);
 }
-

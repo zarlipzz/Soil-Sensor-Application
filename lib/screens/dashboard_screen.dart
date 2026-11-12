@@ -1,7 +1,9 @@
-﻿// Dashboard screen โ€” responsive for Samsung Galaxy Tab A9
+// Dashboard screen โ€” responsive for Samsung Galaxy Tab A9
 import '../widgets/sensor_card.dart';
+
 import 'dart:typed_data';
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -10,7 +12,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../models/soil_measurement.dart';
 import '../models/measurement_source.dart';
-import '../services/firebase_service.dart';
+import '../services/home_assistant_service.dart';
 import '../services/gps_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/usb_serial_service.dart';
@@ -27,12 +29,11 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-
   // ----- Service instances -----
   final LocalStorageService _storageService = LocalStorageService();
   final UsbSerialService _usbService = UsbSerialService();
   final GpsService _gpsService = GpsService();
-  final FirebaseService _firebaseService = FirebaseService();
+  final HomeAssistantService _homeAssistantService = HomeAssistantService();
 
   // ----- State variables -----
   List<SoilMeasurement> _localLogs = [];
@@ -41,8 +42,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _hasFreshData = false;
   bool _isSaving = false;
   UsbConnectionStatus _usbStatus = UsbConnectionStatus.disconnected;
-
-
 
   // Additional state variables
   bool _isCloudSyncing = false;
@@ -60,8 +59,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _initServices();
   }
-
-
 
   Future<void> _initServices() async {
     // Load cached logs
@@ -119,12 +116,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!enabled || !await _gpsService.requestPermission()) return;
     final loc = await _gpsService.getCurrentLocation();
     if (mounted && loc != null) setState(() => _currentGpsLocation = loc);
-    _gpsPositionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 1),
-    ).listen((position) {
-      if (!mounted) return;
-      setState(() => _currentGpsLocation = GpsLocationData(latitude: position.latitude, longitude: position.longitude, accuracy: position.accuracy, timestamp: position.timestamp));
-    });
+    _gpsPositionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.bestForNavigation,
+            distanceFilter: 1,
+          ),
+        ).listen((position) {
+          if (!mounted) return;
+          setState(
+            () => _currentGpsLocation = GpsLocationData(
+              latitude: position.latitude,
+              longitude: position.longitude,
+              accuracy: position.accuracy,
+              timestamp: position.timestamp,
+            ),
+          );
+        });
   }
 
   @override
@@ -137,25 +145,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ---------- Data handling ----------
   Future<void> _processNewMeasurement(SoilMeasurement measurement) async {
     // Save locally
-    final updatedList = await _storageService.saveMeasurement(measurement, _localLogs);
+    final updatedList = await _storageService.saveMeasurement(
+      measurement,
+      _localLogs,
+    );
     if (mounted) setState(() => _localLogs = updatedList);
 
     // Upload to cloud if needed
     if (mounted) setState(() => _isCloudSyncing = true);
-    final uploaded = await _firebaseService.uploadMeasurement(measurement) ?? false;
+    final uploaded = await _homeAssistantService.uploadMeasurement(measurement);
     if (uploaded) {
-      final syncedList = await _storageService.updateSyncStatus(measurement.id, true, _localLogs);
+      final syncedList = await _storageService.updateSyncStatus(
+        measurement.id,
+        true,
+        _localLogs,
+      );
       if (mounted) {
         setState(() {
           measurement.isSyncedToCloud = true;
           _localLogs = syncedList;
           _isCloudSyncing = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('บันทึกลงเครื่องและซิงก์ขึ้น Firebase เรียบร้อย!'),
-          duration: Duration(seconds: 2),
-          backgroundColor: AppColors.softBlue,
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'บันทึกลงเครื่องและส่งไปยัง Home Assistant เรียบร้อย!',
+            ),
+            duration: Duration(seconds: 2),
+            backgroundColor: AppColors.softBlue,
+          ),
+        );
       }
     } else {
       if (mounted) setState(() => _isCloudSyncing = false);
@@ -182,7 +201,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final now = DateTime.now();
       final simulated = SoilMeasurement(
         id: 'SIM-${now.millisecondsSinceEpoch}',
-        temperature: (_currentData.temperature + (0.1 - (0.2 * (now.second % 2)))).clamp(20.0, 35.0),
+        temperature:
+            (_currentData.temperature + (0.1 - (0.2 * (now.second % 2)))).clamp(
+              20.0,
+              35.0,
+            ),
         moisture: _currentData.moisture,
         ec: _currentData.ec,
         salinity: _currentData.salinity,
@@ -204,11 +227,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await _processNewMeasurement(simulated);
     }
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('อ่านค่าและบันทึกเรียบร้อย (${_formatTime(_currentData.timestamp)})'),
-        duration: const Duration(seconds: 1),
-        backgroundColor: AppColors.softBlue,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'อ่านค่าและบันทึกเรียบร้อย (${_formatTime(_currentData.timestamp)})',
+          ),
+          duration: const Duration(seconds: 1),
+          backgroundColor: AppColors.softBlue,
+        ),
+      );
     }
   }
 
@@ -232,7 +259,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  String _formatTime(DateTime dt) => "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}";
+  String _formatTime(DateTime dt) =>
+      "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}";
 
   // ---------- Local Logs Modal ----------
   void _openLocalLogsView() {
@@ -250,7 +278,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_, scrollController) => Column(
           children: [
             const SizedBox(height: 12),
-            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -258,8 +293,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   const Icon(Icons.history_rounded, color: AppColors.softBlue),
                   const SizedBox(width: 8),
-                  Text('บันทึกในเครื่อง (${_localLogs.length} รายการ)',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    'บันทึกในเครื่อง (${_localLogs.length} รายการ)',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -274,14 +314,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         final m = _localLogs[i];
                         return ListTile(
                           dense: true,
-                          leading: const Icon(Icons.eco_rounded, color: AppColors.softBlue, size: 20),
-                          title: Text('${m.timestamp.day}/${m.timestamp.month}/${m.timestamp.year} ${_formatTime(m.timestamp)}',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                          subtitle: Text('ความชื้น: ${m.moisture.toStringAsFixed(1)}%  อุณหภูมิ: ${m.temperature.toStringAsFixed(1)} °C',
-                              style: const TextStyle(fontSize: 11)),
+                          leading: const Icon(
+                            Icons.eco_rounded,
+                            color: AppColors.softBlue,
+                            size: 20,
+                          ),
+                          title: Text(
+                            '${m.timestamp.day}/${m.timestamp.month}/${m.timestamp.year} ${_formatTime(m.timestamp)}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: Text(
+                            'ความชื้น: ${m.moisture.toStringAsFixed(1)}%  อุณหภูมิ: ${m.temperature.toStringAsFixed(1)} °C',
+                            style: const TextStyle(fontSize: 11),
+                          ),
                           trailing: m.isSyncedToCloud
-                              ? const Icon(Icons.cloud_done_rounded, color: AppColors.softBlue, size: 18)
-                              : const Icon(Icons.cloud_off_rounded, color: Colors.grey, size: 18),
+                              ? const Icon(
+                                  Icons.cloud_done_rounded,
+                                  color: AppColors.softBlue,
+                                  size: 18,
+                                )
+                              : const Icon(
+                                  Icons.cloud_off_rounded,
+                                  color: Colors.grey,
+                                  size: 18,
+                                ),
                         );
                       },
                     ),
@@ -303,19 +362,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.location_on_outlined, size: 13, color: AppColors.softBlue),
+          const Icon(
+            Icons.location_on_outlined,
+            size: 13,
+            color: AppColors.softBlue,
+          ),
           const SizedBox(width: 4),
           Expanded(
             child: Text(
-              'GPS: ${_currentGpsLocation!.latitude.toStringAsFixed(5)}, ${_currentGpsLocation!.longitude.toStringAsFixed(5)} (ยฑ${_currentGpsLocation!.accuracy.toStringAsFixed(0)}m)',
-              style: const TextStyle(fontSize: 10, color: AppColors.statusDarkText),
+              'GPS: ${_currentGpsLocation!.latitude.toStringAsFixed(5)}, ${_currentGpsLocation!.longitude.toStringAsFixed(5)} (+-${_currentGpsLocation!.accuracy.toStringAsFixed(0)}m)',
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.statusDarkText,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Container(
-            width: 6, height: 6,
-            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.green),
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.green,
+            ),
           ),
         ],
       ),
@@ -328,28 +398,52 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? LatLng(_currentGpsLocation!.latitude, _currentGpsLocation!.longitude)
         : const LatLng(13.75, 100.52); // Bangkok default
     final validLogs = _localLogs
-        .where((m) => m.latitude != null && m.longitude != null && m.latitude!.isFinite && m.longitude!.isFinite)
+        .where(
+          (m) =>
+              m.latitude != null &&
+              m.longitude != null &&
+              m.latitude!.isFinite &&
+              m.longitude!.isFinite,
+        )
         .toList();
     final groups = <({LatLng center, List<SoilMeasurement> logs})>[];
     for (final log in validLogs) {
       final point = LatLng(log.latitude!, log.longitude!);
-      final i = groups.indexWhere((g) => const Distance().as(LengthUnit.Meter, g.center, point) <= _groupRadiusMeters);
-      if (i == -1) { groups.add((center: point, logs: [log])); } else { groups[i].logs.add(log); }
+      final i = groups.indexWhere(
+        (g) =>
+            const Distance().as(LengthUnit.Meter, g.center, point) <=
+            _groupRadiusMeters,
+      );
+      if (i == -1) {
+        groups.add((center: point, logs: [log]));
+      } else {
+        groups[i].logs.add(log);
+      }
     }
-    final savedMarkers = groups.map((group) => Marker(
-              point: group.center,
-              width: 30,
-              height: 36,
-              child: GestureDetector(
-                onTap: () => _showMeasurementGroupOnMap(group.logs),
-                child: const Icon(Icons.location_on, color: Colors.green, size: 30),
+    final savedMarkers = groups
+        .map(
+          (group) => Marker(
+            point: group.center,
+            width: 30,
+            height: 36,
+            child: GestureDetector(
+              onTap: () => _showMeasurementGroupOnMap(group.logs),
+              child: const Icon(
+                Icons.location_on,
+                color: Colors.green,
+                size: 30,
               ),
-            ))
+            ),
+          ),
+        )
         .toList();
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: FlutterMap(
-        options: MapOptions(initialCenter: center, initialZoom: _currentGpsLocation != null ? 15 : 5),
+        options: MapOptions(
+          initialCenter: center,
+          initialZoom: _currentGpsLocation != null ? 15 : 5,
+        ),
         children: [
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -357,14 +451,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             tileProvider: NonNetworkTileProvider(),
           ),
           if (_currentGpsLocation != null)
-            MarkerLayer(markers: [
-              Marker(
-                point: center,
-                width: 32,
-                height: 32,
-                child: const Icon(Icons.location_pin, color: Colors.red, size: 32),
-              ),
-            ]),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: center,
+                  width: 32,
+                  height: 32,
+                  child: const Icon(
+                    Icons.location_pin,
+                    color: Colors.red,
+                    size: 32,
+                  ),
+                ),
+              ],
+            ),
           MarkerLayer(markers: savedMarkers),
         ],
       ),
@@ -383,13 +483,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
           controller: controller,
           padding: const EdgeInsets.all(16),
           children: [
-            Text('ข้อมูลหมุด ${measurements.length} รายการ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              'ข้อมูลหมุด ${measurements.length} รายการ',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             const Divider(),
-            ...measurements.reversed.map((m) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text('${m.timestamp}'),
-              subtitle: Text('ความชื้น ${m.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${m.temperature.toStringAsFixed(1)} °C\nEC ${m.ec} µS/cm · Salinity ${m.salinity} mg/L · N ${m.nitrogen} · P ${m.phosphorus} · K ${m.potassium} · pH ${m.ph.toStringAsFixed(2)}'),
-            )),
+            ...measurements.reversed.map(
+              (m) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('${m.timestamp}'),
+                subtitle: Text(
+                  'ความชื้น ${m.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${m.temperature.toStringAsFixed(1)} °C\nEC ${m.ec} µS/cm · Salinity ${m.salinity} mg/L · N ${m.nitrogen} · P ${m.phosphorus} · K ${m.potassium} · pH ${m.ph.toStringAsFixed(2)}',
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -404,36 +511,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: _usbStatus == UsbConnectionStatus.connected ? _triggerRead : null,
+            onPressed: _usbStatus == UsbConnectionStatus.connected
+                ? _triggerRead
+                : null,
             icon: Icon(Icons.refresh_rounded, size: compact ? 16 : 18),
-            label: Text('อ่านค่าเซนเซอร์',
-                style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis),
+            label: Text(
+              'อ่านค่าเซนเซอร์',
+              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.softBlue,
               foregroundColor: Colors.white,
               padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: (_hasFreshData && !_isSaving &&
+            onPressed:
+                (_hasFreshData &&
+                    !_isSaving &&
                     _currentSource == MeasurementSource.physicalSensor &&
                     _lastSavedMeasurementId != _currentData.id)
                 ? _saveCurrentMeasurement
                 : null,
             icon: Icon(Icons.save_rounded, size: compact ? 16 : 18),
-            label: Text('บันทึกข้อมูล',
-                style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
-                overflow: TextOverflow.ellipsis),
+            label: Text(
+              'บันทึกข้อมูล',
+              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
+              overflow: TextOverflow.ellipsis,
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.statusConnected,
               foregroundColor: Colors.white,
               padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
         ),
@@ -451,14 +570,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
       mainAxisSpacing: 6,
       childAspectRatio: aspectRatio,
       children: [
-        SensorCard(title: 'ความชื้น', value: '${_currentData.moisture.toStringAsFixed(1)} %', icon: Icons.water_drop_rounded, color: AppColors.moistureColor, subtext: 'เหมาะสม: 15–35%'),
-        SensorCard(title: 'อุณหภูมิ', value: '${_currentData.temperature.toStringAsFixed(1)} °C', icon: Icons.thermostat_rounded, color: AppColors.tempColor, subtext: 'ปกติ: 20–30 °C'),
-        SensorCard(title: 'pH', value: _currentData.ph.toStringAsFixed(2), icon: Icons.science_rounded, color: AppColors.phColor, subtext: 'Neutral: 6.5โ€“7.5'),
-        SensorCard(title: 'EC', value: '${_currentData.ec} µS/cm', icon: Icons.bolt_rounded, color: AppColors.ecColor, subtext: 'ปกติ: 100–1000'),
-        SensorCard(title: 'ไนโตรเจน', value: '${_currentData.nitrogen} mg/kg', icon: Icons.grass_rounded, color: AppColors.nitrogenColor, subtext: 'Available N'),
-        SensorCard(title: 'ฟอสฟอรัส', value: '${_currentData.phosphorus} mg/kg', icon: Icons.grain_rounded, color: AppColors.phosphorusColor, subtext: 'Available P'),
-        SensorCard(title: 'โพแทสเซียม', value: '${_currentData.potassium} mg/kg', icon: Icons.spa_rounded, color: AppColors.potassiumColor, subtext: 'Available K'),
-        SensorCard(title: 'ความเค็ม', value: '${_currentData.salinity} mg/L', icon: Icons.waves_rounded, color: AppColors.salinityColor, subtext: 'มาตรฐาน: <800 mg/L'),
+        SensorCard(
+          title: 'ความชื้น',
+          value: '${_currentData.moisture.toStringAsFixed(1)} %',
+          icon: Icons.water_drop_rounded,
+          color: AppColors.moistureColor,
+          subtext: 'เหมาะสม: 15–35%',
+        ),
+        SensorCard(
+          title: 'อุณหภูมิ',
+          value: '${_currentData.temperature.toStringAsFixed(1)} °C',
+          icon: Icons.thermostat_rounded,
+          color: AppColors.tempColor,
+          subtext: 'ปกติ: 20–30 °C',
+        ),
+        SensorCard(
+          title: 'pH',
+          value: _currentData.ph.toStringAsFixed(2),
+          icon: Icons.science_rounded,
+          color: AppColors.phColor,
+          subtext: 'Neutral: 6.5-7.5',
+        ),
+        SensorCard(
+          title: 'EC',
+          value: '${_currentData.ec} µS/cm',
+          icon: Icons.bolt_rounded,
+          color: AppColors.ecColor,
+          subtext: 'ปกติ: 100–1000',
+        ),
+        SensorCard(
+          title: 'ไนโตรเจน',
+          value: '${_currentData.nitrogen} mg/kg',
+          icon: Icons.grass_rounded,
+          color: AppColors.nitrogenColor,
+          subtext: 'Available N',
+        ),
+        SensorCard(
+          title: 'ฟอสฟอรัส',
+          value: '${_currentData.phosphorus} mg/kg',
+          icon: Icons.grain_rounded,
+          color: AppColors.phosphorusColor,
+          subtext: 'Available P',
+        ),
+        SensorCard(
+          title: 'โพแทสเซียม',
+          value: '${_currentData.potassium} mg/kg',
+          icon: Icons.spa_rounded,
+          color: AppColors.potassiumColor,
+          subtext: 'Available K',
+        ),
+        SensorCard(
+          title: 'ความเค็ม',
+          value: '${_currentData.salinity} mg/L',
+          icon: Icons.waves_rounded,
+          color: AppColors.salinityColor,
+          subtext: 'มาตรฐาน: <800 mg/L',
+        ),
       ],
     );
   }
@@ -480,17 +647,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 color: Colors.white.withOpacity(0.18),
                 borderRadius: BorderRadius.circular(7),
               ),
-              child: const Icon(Icons.eco_rounded, size: 18, color: Colors.white),
+              child: const Icon(
+                Icons.eco_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: const [
-                Text('Soil Multi-Parameter Sensor',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                Text(AppConstants.appSubtitle,
-                    style: TextStyle(fontSize: 10, color: Colors.white70)),
+                Text(
+                  'Soil Multi-Parameter Sensor',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                Text(
+                  AppConstants.appSubtitle,
+                  style: TextStyle(fontSize: 10, color: Colors.white70),
+                ),
               ],
             ),
           ],
@@ -518,8 +693,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     child: Center(
                       child: Text(
-                        (_localLogs.length - _seenLogCount) > 99 ? '99+' : '${_localLogs.length - _seenLogCount}',
-                        style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold),
+                        (_localLogs.length - _seenLogCount) > 99
+                            ? '99+'
+                            : '${_localLogs.length - _seenLogCount}',
+                        style: const TextStyle(
+                          fontSize: 8,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
@@ -529,9 +710,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: SafeArea(
-        child: isPortrait
-            ? _buildPortrait(size)
-            : _buildLandscape(size),
+        child: isPortrait ? _buildPortrait(size) : _buildLandscape(size),
       ),
     );
   }
@@ -596,10 +775,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // LEFT: Map fills full height
-          Expanded(
-            flex: 1,
-            child: _buildMap(),
-          ),
+          Expanded(flex: 1, child: _buildMap()),
 
           const SizedBox(width: 8),
 

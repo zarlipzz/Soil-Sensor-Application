@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
 import '../services/gps_service.dart';
 import '../utils/app_constants.dart';
 
@@ -29,14 +30,14 @@ class DeviceStatusIndicator extends StatelessWidget {
     final statusText = kIsWeb
         ? 'โหมดทดสอบจำลอง (Web Preview Mode)'
         : (isDeviceConnected
-            ? 'เซนเซอร์ USB เชื่อมต่อแล้ว (CH340 Ready)'
-            : 'รอเสียบสายเซนเซอร์ USB OTG');
+              ? 'เซนเซอร์ USB เชื่อมต่อแล้ว (CH340 Ready)'
+              : 'รอเสียบสายเซนเซอร์ USB OTG');
 
     final statusColor = kIsWeb
         ? AppColors.softBlue
         : (isDeviceConnected
-            ? AppColors.statusConnected
-            : AppColors.statusWarning);
+              ? AppColors.statusConnected
+              : AppColors.statusWarning);
 
     return Column(
       children: [
@@ -46,8 +47,8 @@ class DeviceStatusIndicator extends StatelessWidget {
               kIsWeb
                   ? Icons.preview_rounded
                   : (isDeviceConnected
-                      ? Icons.usb_rounded
-                      : Icons.usb_off_rounded),
+                        ? Icons.usb_rounded
+                        : Icons.usb_off_rounded),
               color: statusColor,
               size: 22,
             ),
@@ -82,7 +83,7 @@ class DeviceStatusIndicator extends StatelessWidget {
               )
             else
               const Tooltip(
-                message: 'เชื่อมต่อ Firebase Firestore แล้ว',
+                message: 'พร้อมส่งข้อมูลไปยัง Home Assistant',
                 child: Icon(
                   Icons.cloud_done_rounded,
                   color: AppColors.softBlue,

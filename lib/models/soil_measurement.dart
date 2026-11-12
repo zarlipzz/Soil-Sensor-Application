@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
 import '../utils/app_constants.dart';
 
 /// Data Model representing 8-in-1 Soil Measurement parameters and GPS coordinates.
@@ -118,7 +118,9 @@ class SoilMeasurement {
   /// Deserializes from JSON Map with backward compatibility
   factory SoilMeasurement.fromJson(Map<String, dynamic> json) {
     return SoilMeasurement(
-      id: json['id'] as String? ?? 'LOG-${DateTime.now().millisecondsSinceEpoch}',
+      id:
+          json['id'] as String? ??
+          'LOG-${DateTime.now().millisecondsSinceEpoch}',
       temperature: (json['temperature'] as num).toDouble(),
       moisture: (json['moisture'] as num).toDouble(),
       ec: (json['ec'] as num).toInt(),
@@ -127,7 +129,9 @@ class SoilMeasurement {
       phosphorus: (json['phosphorus'] as num).toInt(),
       potassium: (json['potassium'] as num).toInt(),
       ph: (json['ph'] as num).toDouble(),
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
       isSyncedToCloud: json['isSyncedToCloud'] as bool? ?? false,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
@@ -138,10 +142,9 @@ class SoilMeasurement {
     );
   }
 
-  /// Converts to Firestore Document Map preserving existing cloud schema
-  Map<String, dynamic> toFirestoreMap() {
+  /// Payload sent as `event_data` to Home Assistant's REST events endpoint.
+  Map<String, dynamic> toHomeAssistantEventData() {
     final map = <String, dynamic>{
-      'timestamp': FieldValue.serverTimestamp(),
       'local_log_id': id,
       'recorded_at': timestamp.toIso8601String(),
       'device_id': AppConstants.defaultDeviceId,
