@@ -13,7 +13,9 @@ import 'package:geolocator/geolocator.dart';
 import '../models/soil_measurement.dart';
 import '../services/home_assistant_service.dart';
 import '../services/gps_service.dart';
+import '../services/device_identity_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/measurement_engine.dart';
 import '../services/usb_serial_service.dart';
 import '../utils/app_constants.dart';
 import '../widgets/non_network_tile_provider.dart';
@@ -33,6 +35,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final UsbSerialService _usbService = UsbSerialService();
   final GpsService _gpsService = GpsService();
   final HomeAssistantService _homeAssistantService = HomeAssistantService();
+  final DeviceIdentityService _deviceIdentityService = DeviceIdentityService();
+  final MeasurementEngine _measurementEngine = MeasurementEngine();
 
   // ----- State variables -----
   List<SoilMeasurement> _localLogs = [];
@@ -42,6 +46,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // Additional state variables
   bool _isCloudSyncing = false;
+  bool _isMeasuring = false;
+  DeviceIdentity? _deviceIdentity;
+  Timer? _nextSampleTimer;
   GpsLocationData? _currentGpsLocation;
   StreamSubscription<Position>? _gpsPositionSubscription;
 
@@ -56,6 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _initServices() async {
+    _loadDeviceIdentity();
     // Load cached logs
     final logs = await _storageService.loadMeasurements();
     if (mounted) {
@@ -69,30 +77,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // USB status callbacks
     _usbService.onStatusChanged = (status) {
-      if (mounted) {
-        setState(() {
-          _usbStatus = status;
-        });
+      if (!mounted) return;
+      setState(() => _usbStatus = status);
+      if (status == UsbConnectionStatus.disconnected ||
+          status == UsbConnectionStatus.permissionDenied ||
+          status == UsbConnectionStatus.connectionFailed) {
+        _stopMeasurement(
+          'Measurement stopped because the USB sensor is unavailable.',
+        );
       }
+      _showUsbStatus(status);
     };
 
     // Packet callback โ€“ only called after Modbus validation in USB service
-    _usbService.onPacketReceived = (Uint8List packet) async {
-      final gps = await _gpsService.getCurrentLocation();
-      final measurement = SoilMeasurement.fromRawBytes(
-        packet,
-        latitude: gps?.latitude,
-        longitude: gps?.longitude,
-        gpsAccuracy: gps?.accuracy,
-        locationTimestamp: gps?.timestamp,
-      );
-      if (mounted) {
-        setState(() {
-          _currentData = measurement;
-          _currentGpsLocation = gps;
-        });
-      }
-      await _processNewMeasurement(measurement);
+    _usbService.onPacketReceived = _handleSamplePacket;
+    _usbService.onModbusQueryFailed = () {
+      if (_measurementEngine.isCollecting) _scheduleNextSample();
     };
 
     // Initialise USB detection and GPS
@@ -126,9 +126,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    _nextSampleTimer?.cancel();
+    _measurementEngine.dispose();
     _gpsPositionSubscription?.cancel();
     _usbService.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadDeviceIdentity() async {
+    try {
+      final identity = await _deviceIdentityService.getIdentity();
+      if (mounted) setState(() => _deviceIdentity = identity);
+    } catch (error) {
+      debugPrint('[DashboardScreen] Device identity unavailable: $error');
+    }
+  }
+
+  void _handleSamplePacket(Uint8List packet) {
+    final samples = _measurementEngine.addSample(
+      SoilSample.fromRawBytes(packet),
+    );
+    if (samples == null) {
+      if (_measurementEngine.isCollecting) _scheduleNextSample();
+      return;
+    }
+    _completeMeasurement(samples);
+  }
+
+  Future<void> _completeMeasurement(List<SoilSample> samples) async {
+    _nextSampleTimer?.cancel();
+    DeviceIdentity identity;
+    try {
+      identity = _deviceIdentity ?? await _deviceIdentityService.getIdentity();
+    } catch (error) {
+      _stopMeasurement(
+        'Measurement could not be saved: device identity is unavailable.',
+      );
+      debugPrint('[DashboardScreen] Cannot complete measurement: $error');
+      return;
+    }
+    final gps = await _gpsService.getCurrentLocation();
+    final timestamp = _measurementEngine.completedAt;
+    final measurement = SoilMeasurement.fromAveragedSamples(
+      id: 'MEAS-${timestamp.millisecondsSinceEpoch}',
+      rawSamples: samples,
+      timestamp: timestamp,
+      deviceId: identity.id,
+      deviceMetadata: identity.metadata,
+      latitude: gps?.latitude,
+      longitude: gps?.longitude,
+      gpsAccuracy: gps?.accuracy,
+      locationTimestamp: gps?.timestamp,
+    );
+    if (mounted) {
+      setState(() {
+        _isMeasuring = false;
+        _currentData = measurement;
+        _currentGpsLocation = gps;
+      });
+    }
+    await _processNewMeasurement(measurement);
+  }
+
+  void _scheduleNextSample() {
+    _nextSampleTimer?.cancel();
+    _nextSampleTimer = Timer(
+      const Duration(milliseconds: 200),
+      _requestNextSample,
+    );
+  }
+
+  Future<void> _requestNextSample() async {
+    if (!_measurementEngine.isCollecting ||
+        _usbStatus != UsbConnectionStatus.ready) {
+      return;
+    }
+    final sent = await _usbService.sendQuery();
+    if (!sent && _measurementEngine.isCollecting) _scheduleNextSample();
+  }
+
+  void _stopMeasurement(String message) {
+    if (!_measurementEngine.isCollecting && !_isMeasuring) return;
+    _nextSampleTimer?.cancel();
+    _measurementEngine.cancel();
+    if (mounted) {
+      setState(() => _isMeasuring = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   // ---------- Data handling ----------
@@ -172,10 +257,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Read flow ----------
   Future<void> _triggerRead() async {
+    if (_isMeasuring) return;
+    if (_usbStatus != UsbConnectionStatus.ready) {
+      if (_usbStatus == UsbConnectionStatus.connectionFailed ||
+          _usbStatus == UsbConnectionStatus.permissionDenied ||
+          _usbStatus == UsbConnectionStatus.disconnected) {
+        await _usbService.retry();
+      }
+      return;
+    }
+
+    setState(() => _isMeasuring = true);
+    _measurementEngine.start(
+      onTimeout: () => _stopMeasurement(
+        'Measurement timed out before 10 valid samples were received.',
+      ),
+    );
+    await _requestNextSample();
+    // Completion is handled by _handleSamplePacket after ten valid frames.
+    if (_isMeasuring) return;
+
     final gps = await _gpsService.getCurrentLocation();
     if (mounted) setState(() => _currentGpsLocation = gps);
 
-    if (_usbStatus == UsbConnectionStatus.connected) {
+    if (_usbStatus == UsbConnectionStatus.ready) {
       // Physical read โ€“ USB service will emit a validated packet
       await _usbService.sendQuery();
     } else {
@@ -219,6 +324,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
     }
+  }
+
+  void _showUsbStatus(UsbConnectionStatus status) {
+    final message = switch (status) {
+      UsbConnectionStatus.requestingPermission => 'Requesting USB permission…',
+      UsbConnectionStatus.permissionDenied =>
+        'USB permission was denied. Tap Read sensor to retry.',
+      UsbConnectionStatus.connecting => 'Connecting to the CH340 sensor…',
+      UsbConnectionStatus.initializing =>
+        'Sensor is initializing for 3 seconds. Readings are being discarded.',
+      UsbConnectionStatus.ready => 'CH340 sensor is ready.',
+      UsbConnectionStatus.connectionFailed => 'Sensor initialization failed. Reconnect it or tap Read sensor to retry.',
+      UsbConnectionStatus.disconnected => 'USB sensor disconnected.',
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+        backgroundColor:
+            status == UsbConnectionStatus.connectionFailed ||
+                status == UsbConnectionStatus.permissionDenied
+            ? AppColors.statusWarning
+            : AppColors.softBlue,
+      ),
+    );
   }
 
   String _formatTime(DateTime dt) =>
@@ -450,9 +580,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const Divider(),
-            ...(List<SoilMeasurement>.from(measurements)
-                  ..sort((a, b) => b.timestamp.compareTo(a.timestamp)))
-                .map(
+            ...(List<SoilMeasurement>.from(
+              measurements,
+            )..sort((a, b) => b.timestamp.compareTo(a.timestamp))).map(
               (m) => ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('${m.timestamp}'),
@@ -475,12 +605,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: _usbStatus == UsbConnectionStatus.connected
-                ? _triggerRead
-                : null,
-            icon: Icon(Icons.refresh_rounded, size: compact ? 16 : 18),
+            onPressed:
+                _isMeasuring ||
+                    _usbStatus == UsbConnectionStatus.initializing ||
+                    _usbStatus == UsbConnectionStatus.connecting ||
+                    _usbStatus == UsbConnectionStatus.requestingPermission
+                ? null
+                : _triggerRead,
+            icon: _isMeasuring
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Icon(Icons.refresh_rounded, size: compact ? 16 : 18),
             label: Text(
-              'อ่านค่าเซนเซอร์',
+              _isMeasuring
+                  ? 'กำลังตรวจวัดค่าดิน'
+                  : _usbStatus == UsbConnectionStatus.ready
+                  ? 'Read sensor'
+                  : 'Retry sensor',
               style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
               overflow: TextOverflow.ellipsis,
             ),

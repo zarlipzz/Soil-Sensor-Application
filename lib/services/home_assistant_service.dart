@@ -27,7 +27,7 @@ class HomeAssistantService {
         ? _baseUrl.substring(0, _baseUrl.length - 1)
         : _baseUrl;
     final commonAttributes = <String, dynamic>{
-      'device_id': 'CH340-SOIL-01',
+      'device_id': measurement.deviceId,
       'recorded_at': measurement.timestamp.toIso8601String(),
       'local_log_id': measurement.id,
       if (measurement.latitude != null) 'latitude': measurement.latitude,

@@ -35,6 +35,10 @@ class LocalStorageService {
     SoilMeasurement measurement,
     List<SoilMeasurement> currentList,
   ) async {
+    // Retries after a sync failure must not create a second local record.
+    if (currentList.any((item) => item.id == measurement.id)) {
+      return List<SoilMeasurement>.from(currentList);
+    }
     final updatedList = List<SoilMeasurement>.from(currentList);
     updatedList.insert(0, measurement);
     if (updatedList.length > maxLogs) {
