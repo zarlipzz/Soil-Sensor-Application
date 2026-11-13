@@ -142,37 +142,6 @@ class SoilMeasurement {
     );
   }
 
-  /// Payload sent as `event_data` to Home Assistant's REST events endpoint.
-  Map<String, dynamic> toHomeAssistantEventData() {
-    final map = <String, dynamic>{
-      'local_log_id': id,
-      'recorded_at': timestamp.toIso8601String(),
-      'device_id': AppConstants.defaultDeviceId,
-      'parameters': {
-        'temperature_c': temperature,
-        'moisture_percent': moisture,
-        'ec_us_cm': ec,
-        'salinity_mg_l': salinity,
-        'nitrogen_mg_kg': nitrogen,
-        'phosphorus_mg_kg': phosphorus,
-        'potassium_mg_kg': potassium,
-        'ph_value': ph,
-      },
-    };
-
-    if (latitude != null && longitude != null) {
-      map['location'] = {
-        'latitude': latitude,
-        'longitude': longitude,
-        if (gpsAccuracy != null) 'accuracy': gpsAccuracy,
-        if (locationTimestamp != null)
-          'location_timestamp': locationTimestamp!.toIso8601String(),
-      };
-    }
-
-    return map;
-  }
-
   /// Creates a copy with modified values
   SoilMeasurement copyWith({
     String? id,

@@ -11,7 +11,6 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/soil_measurement.dart';
-import '../models/measurement_source.dart';
 import '../services/home_assistant_service.dart';
 import '../services/gps_service.dart';
 import '../services/local_storage_service.dart';
@@ -39,14 +38,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<SoilMeasurement> _localLogs = [];
   int _seenLogCount = 0;
   SoilMeasurement _currentData = SoilMeasurement.initial();
-  bool _hasFreshData = false;
-  bool _isSaving = false;
   UsbConnectionStatus _usbStatus = UsbConnectionStatus.disconnected;
 
   // Additional state variables
   bool _isCloudSyncing = false;
-  String? _lastSavedMeasurementId;
-  MeasurementSource _currentSource = MeasurementSource.simulation;
   GpsLocationData? _currentGpsLocation;
   StreamSubscription<Position>? _gpsPositionSubscription;
 
@@ -77,10 +72,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) {
         setState(() {
           _usbStatus = status;
-          if (status != UsbConnectionStatus.connected) {
-            _hasFreshData = false;
-            _currentSource = MeasurementSource.simulation;
-          }
         });
       }
     };
@@ -99,8 +90,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _currentData = measurement;
           _currentGpsLocation = gps;
-          _hasFreshData = true;
-          _currentSource = MeasurementSource.physicalSensor;
         });
       }
       await _processNewMeasurement(measurement);
@@ -183,13 +172,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Read flow ----------
   Future<void> _triggerRead() async {
-    // Reset fresh data before a new read
-    if (mounted) {
-      setState(() {
-        _hasFreshData = false;
-        _currentSource = MeasurementSource.simulation;
-      });
-    }
     final gps = await _gpsService.getCurrentLocation();
     if (mounted) setState(() => _currentGpsLocation = gps);
 
@@ -236,26 +218,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           backgroundColor: AppColors.softBlue,
         ),
       );
-    }
-  }
-
-  // ---------- Save flow ----------
-  Future<void> _saveCurrentMeasurement() async {
-    if (!_hasFreshData) return;
-    if (_currentSource != MeasurementSource.physicalSensor) return;
-    if (_lastSavedMeasurementId == _currentData.id) return;
-    if (_isSaving) return;
-    setState(() => _isSaving = true);
-    try {
-      await _processNewMeasurement(_currentData);
-      if (mounted) {
-        setState(() {
-          _lastSavedMeasurementId = _currentData.id;
-          _hasFreshData = false;
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -327,7 +289,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                           subtitle: Text(
-                            'ความชื้น: ${m.moisture.toStringAsFixed(1)}%  อุณหภูมิ: ${m.temperature.toStringAsFixed(1)} °C',
+                            'ความชื้น: ${m.moisture.toStringAsFixed(1)}%  อุณหภูมิ: ${m.temperature.toStringAsFixed(2)} °C',
                             style: const TextStyle(fontSize: 11),
                           ),
                           trailing: m.isSyncedToCloud
@@ -488,12 +450,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const Divider(),
-            ...measurements.reversed.map(
+            ...(List<SoilMeasurement>.from(measurements)
+                  ..sort((a, b) => b.timestamp.compareTo(a.timestamp)))
+                .map(
               (m) => ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('${m.timestamp}'),
                 subtitle: Text(
-                  'ความชื้น ${m.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${m.temperature.toStringAsFixed(1)} °C\nEC ${m.ec} µS/cm · Salinity ${m.salinity} mg/L · N ${m.nitrogen} · P ${m.phosphorus} · K ${m.potassium} · pH ${m.ph.toStringAsFixed(2)}',
+                  'ความชื้น ${m.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${m.temperature.toStringAsFixed(2)} °C\nEC ${m.ec} µS/cm · Salinity ${m.salinity} mg/L · N ${m.nitrogen} · P ${m.phosphorus} · K ${m.potassium} · pH ${m.ph.toStringAsFixed(2)}',
                 ),
               ),
             ),
@@ -530,32 +494,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed:
-                (_hasFreshData &&
-                    !_isSaving &&
-                    _currentSource == MeasurementSource.physicalSensor &&
-                    _lastSavedMeasurementId != _currentData.id)
-                ? _saveCurrentMeasurement
-                : null,
-            icon: Icon(Icons.save_rounded, size: compact ? 16 : 18),
-            label: Text(
-              'บันทึกข้อมูล',
-              style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.statusConnected,
-              foregroundColor: Colors.white,
-              padding: EdgeInsets.symmetric(vertical: vPad, horizontal: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -579,7 +517,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         SensorCard(
           title: 'อุณหภูมิ',
-          value: '${_currentData.temperature.toStringAsFixed(1)} °C',
+          value: '${_currentData.temperature.toStringAsFixed(2)} °C',
           icon: Icons.thermostat_rounded,
           color: AppColors.tempColor,
           subtext: 'ปกติ: 20–30 °C',
