@@ -2,124 +2,159 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/soil_measurement.dart';
 
-/// Stores each latest measurement in Home Assistant sensor entities.
-class HomeAssistantService {
-  static const _baseUrl = String.fromEnvironment(
-    'HOME_ASSISTANT_URL',
-    defaultValue: 'http://labubu.local',
+class DataHubSettings {
+  const DataHubSettings({required this.url, required this.apiKey});
+
+  static const defaults = DataHubSettings(
+    url: String.fromEnvironment(
+      'DATA_HUB_URL',
+      defaultValue: 'http://192.168.6.223:8099/api/ingest',
+    ),
+    apiKey: String.fromEnvironment('DATA_HUB_API_KEY'),
   );
-  static const _token = String.fromEnvironment(
-    'HOME_ASSISTANT_TOKEN',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhMjAzMzU2NWNjMmY0MTM2OTA2ZjM0NDE3NzU3NzI4NSIsImlhdCI6MTc5NDQ3NzQzNywiZXhwIjoyMTA5ODM3NDM3fQ.gkeo8c8Jf5NkmG2Hsg7fHIfGsEaN6nUka_tnaaiwuwQ',
-  );
 
-  final http.Client _client;
+  final String url;
+  final String apiKey;
 
-  HomeAssistantService({http.Client? client})
-      : _client = client ?? http.Client();
-
-  Future<bool> uploadMeasurement(SoilMeasurement measurement) async {
-    final base = _baseUrl.endsWith('/')
-        ? _baseUrl.substring(0, _baseUrl.length - 1)
-        : _baseUrl;
-    final commonAttributes = <String, dynamic>{
-      'device_id': measurement.deviceId,
-      'recorded_at': measurement.timestamp.toIso8601String(),
-      'local_log_id': measurement.id,
-      if (measurement.latitude != null) 'latitude': measurement.latitude,
-      if (measurement.longitude != null) 'longitude': measurement.longitude,
-      if (measurement.gpsAccuracy != null)
-        'gps_accuracy_m': measurement.gpsAccuracy,
-      if (measurement.locationTimestamp != null)
-        'gps_recorded_at': measurement.locationTimestamp!.toIso8601String(),
-    };
-
-    final states = <_SensorState>[
-      _SensorState('temperature', measurement.temperature.toStringAsFixed(2),
-          'Soil temperature', '°C', 'temperature'),
-      _SensorState('moisture', measurement.moisture.toStringAsFixed(1),
-          'Soil moisture', '%', 'humidity'),
-      _SensorState('ec', '${measurement.ec}', 'Soil EC', 'µS/cm', null),
-      _SensorState('salinity', '${measurement.salinity}', 'Soil salinity',
-          'mg/L', null),
-      _SensorState('nitrogen', '${measurement.nitrogen}', 'Soil nitrogen',
-          'mg/kg', null),
-      _SensorState('phosphorus', '${measurement.phosphorus}',
-          'Soil phosphorus', 'mg/kg', null),
-      _SensorState('potassium', '${measurement.potassium}', 'Soil potassium',
-          'mg/kg', null),
-      _SensorState('ph', measurement.ph.toStringAsFixed(2), 'Soil pH', null,
-          null),
-      if (measurement.latitude != null && measurement.longitude != null)
-        _SensorState(
-          'gps',
-          '${measurement.latitude!.toStringAsFixed(6)}, ${measurement.longitude!.toStringAsFixed(6)}',
-          'Soil sensor GPS',
-          null,
-          null,
-        ),
-    ];
-
-    try {
-      final results = await Future.wait(
-        states.map((sensor) => _postState(base, sensor, commonAttributes)),
-      );
-      final uploaded = results.every((success) => success);
-      if (uploaded) {
-        debugPrint(
-          '[HomeAssistantService] Updated ${states.length} sensor states.',
-        );
-      }
-      return uploaded;
-    } catch (e) {
-      debugPrint('[HomeAssistantService] Upload failed: $e');
-      return false;
+  static Uri? parseEndpoint(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasFragment) {
+      return null;
     }
-  }
-
-  Future<bool> _postState(
-    String base,
-    _SensorState sensor,
-    Map<String, dynamic> commonAttributes,
-  ) async {
-    final endpoint = Uri.parse('$base/api/states/sensor.soil_ch340_${sensor.id}');
-    final attributes = <String, dynamic>{
-      ...commonAttributes,
-      'friendly_name': sensor.name,
-      'state_class': 'measurement',
-      if (sensor.unit != null) 'unit_of_measurement': sensor.unit,
-      if (sensor.deviceClass != null) 'device_class': sensor.deviceClass,
-    };
-    final response = await _client
-        .post(
-          endpoint,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $_token',
-          },
-          body: jsonEncode({'state': sensor.value, 'attributes': attributes}),
-        )
-        .timeout(const Duration(seconds: 15));
-    final success = response.statusCode >= 200 && response.statusCode < 300;
-    if (!success) {
-      debugPrint(
-        '[HomeAssistantService] ${sensor.id}: HTTP ${response.statusCode}.',
-      );
-    }
-    return success;
+    return uri;
   }
 }
 
-class _SensorState {
-  const _SensorState(this.id, this.value, this.name, this.unit, this.deviceClass);
+enum DataHubUploadResult { uploaded, notConfigured, failed, statusNotSaved }
 
-  final String id;
-  final String value;
-  final String name;
-  final String? unit;
-  final String? deviceClass;
+class HomeAssistantService {
+  HomeAssistantService({http.Client? client})
+    : _client = client ?? http.Client();
+
+  static const _settingsKey = 'soil_data_hub_settings';
+  final http.Client _client;
+
+  Future<DataHubSettings> loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getStringList(_settingsKey);
+    if (stored == null || stored.length != 2) return DataHubSettings.defaults;
+    return DataHubSettings(url: stored[0], apiKey: stored[1]);
+  }
+
+  Future<bool> saveSettings(DataHubSettings settings) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.setStringList(_settingsKey, [settings.url, settings.apiKey]);
+  }
+
+  Future<DataHubUploadResult> uploadMeasurement(
+    SoilMeasurement measurement,
+  ) async {
+    try {
+      final settings = await loadSettings();
+      final endpoint = DataHubSettings.parseEndpoint(settings.url);
+      final apiKey = settings.apiKey.trim();
+      if (endpoint == null || apiKey.isEmpty) {
+        return DataHubUploadResult.notConfigured;
+      }
+
+      final status = await _post(endpoint, apiKey, _ingestPayload(measurement));
+      if (status >= 200 && status < 300) {
+        return DataHubUploadResult.uploaded;
+      }
+
+      debugPrint('[Data Hub] Ingest returned HTTP $status.');
+    } catch (_) {
+      debugPrint('[Data Hub] Ingest request failed.');
+    }
+    return DataHubUploadResult.failed;
+  }
+
+  Future<int> testConnection(DataHubSettings settings) async {
+    final endpoint = DataHubSettings.parseEndpoint(settings.url);
+    final apiKey = settings.apiKey.trim();
+    if (endpoint == null || apiKey.isEmpty) {
+      throw ArgumentError('A valid Data Hub URL and API key are required.');
+    }
+    return _post(endpoint, apiKey, {
+      'device_id': 'meta-farm-api-test',
+      'readings': [
+        {
+          'entity_id': 'sensor.meta_farm_api_test',
+          'state': 1,
+          'measurement_name': 'API connection test',
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+        },
+      ],
+    });
+  }
+
+  Future<int> _post(
+    Uri endpoint,
+    String apiKey,
+    Map<String, Object> payload,
+  ) async {
+    final request = http.Request('POST', endpoint)
+      ..followRedirects = false
+      ..headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      })
+      ..body = jsonEncode(payload);
+    final response = await _client
+        .send(request)
+        .then(http.Response.fromStream)
+        .timeout(const Duration(seconds: 15));
+    return response.statusCode;
+  }
+
+  Map<String, Object> _ingestPayload(SoilMeasurement measurement) {
+    final timestamp = measurement.timestamp.toUtc().toIso8601String();
+    final attributes = <String, Object>{
+      'local_log_id': measurement.id,
+      if (measurement.latitude != null && measurement.longitude != null) ...{
+        'latitude': measurement.latitude!,
+        'longitude': measurement.longitude!,
+        if (measurement.gpsAccuracy != null)
+          'gps_accuracy_m': measurement.gpsAccuracy!,
+        if (measurement.locationTimestamp != null)
+          'gps_recorded_at': measurement.locationTimestamp!
+              .toUtc()
+              .toIso8601String(),
+      },
+    };
+
+    Map<String, Object> reading(String metric, double state, [String? unit]) =>
+        {
+          'entity_id': 'sensor.soil_ch340_$metric',
+          'state': double.parse(state.toStringAsFixed(2)),
+          'unit': ?unit,
+          'measurement_name': measurement.measurementName,
+          'timestamp': timestamp,
+          'attributes': attributes,
+        };
+
+    return {
+      'device_id': measurement.deviceId,
+      'readings': [
+        reading('temperature', measurement.temperature, '°C'),
+        reading('moisture', measurement.moisture, '%'),
+        reading('ec', measurement.ec, 'µS/cm'),
+        reading('salinity', measurement.salinity, 'mg/L'),
+        reading('nitrogen', measurement.nitrogen, 'mg/kg'),
+        reading('phosphorus', measurement.phosphorus, 'mg/kg'),
+        reading('potassium', measurement.potassium, 'mg/kg'),
+        reading('ph', measurement.ph),
+      ],
+    };
+  }
+
+  void dispose() => _client.close();
 }

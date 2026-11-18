@@ -16,7 +16,7 @@ class DeviceIdentity {
 class DeviceIdentityService {
   static const _installationKey = 'soil_installation_uuid_v1';
   DeviceIdentityService({DeviceInfoPlugin? deviceInfo})
-    : _deviceInfo = deviceInfo ?? DeviceInfoPlugin();
+      : _deviceInfo = deviceInfo ?? DeviceInfoPlugin();
 
   final DeviceInfoPlugin _deviceInfo;
 

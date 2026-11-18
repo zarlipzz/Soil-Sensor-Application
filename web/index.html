@@ -18,19 +18,34 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Meta Soil multi-parameter sensor">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="soil_app">
+  <meta name="apple-mobile-web-app-title" content="Meta Soil">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>soil_app</title>
+  <title>Meta Soil</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    #launch-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      display: grid;
+      place-items: center;
+      background: white;
+      pointer-events: none;
+    }
+    #launch-screen img {
+      width: min(280px, 85vw);
+      height: auto;
+    }
+  </style>
 </head>
 <body>
   <!--
@@ -41,6 +56,14 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <div id="launch-screen">
+    <img src="launch-logo.png" width="280" height="140" alt="Meta Soil">
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', () => {
+      document.getElementById('launch-screen')?.remove();
+    }, { once: true });
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

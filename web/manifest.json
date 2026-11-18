@@ -1,11 +1,11 @@
 {
-    "name": "soil_app",
-    "short_name": "soil_app",
+    "name": "Meta Soil",
+    "short_name": "Meta Soil",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F4F7F5",
+    "theme_color": "#103E3B",
+    "description": "Meta Soil multi-parameter sensor",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

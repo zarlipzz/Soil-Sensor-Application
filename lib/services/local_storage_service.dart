@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/soil_measurement.dart';
 import '../utils/app_constants.dart';
 
@@ -21,7 +23,11 @@ class LocalStorageService {
       final rawList = prefs.getStringList(prefKey);
       if (rawList != null && rawList.isNotEmpty) {
         return rawList
-            .map((str) => SoilMeasurement.fromJson(jsonDecode(str) as Map<String, dynamic>))
+            .map(
+              (str) => SoilMeasurement.fromJson(
+                jsonDecode(str) as Map<String, dynamic>,
+              ),
+            )
             .toList();
       }
     } catch (e) {
@@ -41,11 +47,18 @@ class LocalStorageService {
     }
     final updatedList = List<SoilMeasurement>.from(currentList);
     updatedList.insert(0, measurement);
-    if (updatedList.length > maxLogs) {
-      updatedList.removeLast();
+    // Keep unsent records available for a later upload, even during long outages.
+    while (updatedList.length > maxLogs) {
+      final oldestSynced = updatedList.lastIndexWhere(
+        (record) => record.isSyncedToCloud,
+      );
+      if (oldestSynced < 0) break;
+      updatedList.removeAt(oldestSynced);
     }
 
-    await saveAll(updatedList);
+    if (!await saveAll(updatedList)) {
+      throw StateError('Unable to save the measurement.');
+    }
     return updatedList;
   }
 
@@ -62,18 +75,23 @@ class LocalStorageService {
       return item;
     }).toList();
 
-    await saveAll(updatedList);
+    if (!await saveAll(updatedList)) {
+      throw StateError('Unable to save the measurement sync status.');
+    }
     return updatedList;
   }
 
   /// Persists the full list of measurements as JSON strings.
-  Future<void> saveAll(List<SoilMeasurement> measurements) async {
+  Future<bool> saveAll(List<SoilMeasurement> measurements) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final stringList = measurements.map((item) => jsonEncode(item.toJson())).toList();
-      await prefs.setStringList(prefKey, stringList);
+      final stringList = measurements
+          .map((item) => jsonEncode(item.toJson()))
+          .toList();
+      return await prefs.setStringList(prefKey, stringList);
     } catch (e) {
       debugPrint('[LocalStorageService] Error saving local logs: $e');
+      return false;
     }
   }
 
@@ -84,6 +102,17 @@ class LocalStorageService {
       await prefs.remove(prefKey);
     } catch (e) {
       debugPrint('[LocalStorageService] Error clearing local logs: $e');
+    }
+  }
+
+  /// Deletes only this app's local measurement list from SharedPreferences.
+  Future<bool> clearHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return await prefs.remove(prefKey);
+    } catch (e) {
+      debugPrint('[LocalStorageService] Error clearing history: $e');
+      return false;
     }
   }
 }

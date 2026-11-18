@@ -1,12 +1,15 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+
 import '../models/soil_measurement.dart';
 import '../services/local_storage_service.dart';
 import '../services/gps_service.dart';
-import 'dart:async';
+import '../utils/measurement_map_utils.dart';
+import '../widgets/measurement_group_popup.dart';
 
+import 'dart:async';
 
 /// Screen that displays historical soil measurements on an OpenStreetMap map.
 class MapScreen extends StatefulWidget {
@@ -39,42 +42,42 @@ class _MapScreenState extends State<MapScreen> {
     final enabled = await _gpsService.isLocationServiceEnabled();
     if (!enabled || !await _gpsService.requestPermission()) return;
     final loc = await _gpsService.getCurrentLocation();
-    if (mounted && loc != null) setState(() => _currentPosition = LatLng(loc.latitude, loc.longitude));
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5),
-    ).listen((position) {
-      if (!mounted) return;
-      final point = LatLng(position.latitude, position.longitude);
-      setState(() => _currentPosition = point);
-      _mapController.move(point, 16);
-    });
+    if (mounted && loc != null)
+      setState(() => _currentPosition = LatLng(loc.latitude, loc.longitude));
+    _positionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 5,
+          ),
+        ).listen((position) {
+          if (!mounted) return;
+          final point = LatLng(position.latitude, position.longitude);
+          setState(() => _currentPosition = point);
+          _mapController.move(point, 16);
+        });
   }
 
   /// Build markers from measurements that contain GPS and have valid finite coordinates.
   List<Marker> _buildMarkers(List<SoilMeasurement> measurements) {
-    final valid = measurements
-        .where((m) =>
-            m.latitude != null &&
-            m.longitude != null &&
-            m.latitude!.isFinite &&
-            m.longitude!.isFinite)
-        .toList();
-    final groups = <({LatLng center, List<SoilMeasurement> logs})>[];
-    for (final m in valid) {
-      final point = LatLng(m.latitude!, m.longitude!);
-      final i = groups.indexWhere((g) => const Distance().as(LengthUnit.Meter, g.center, point) <= 15);
-      if (i == -1) { groups.add((center: point, logs: [m])); } else { groups[i].logs.add(m); }
-    }
-    return groups.map((g) => Marker(
-              point: g.center,
-              width: 40,
-              height: 40,
-              // flutter_map 6.x uses a child widget instead of builder.
-              child: IconButton(
-                icon: const Icon(Icons.location_on, color: Colors.green),
-                onPressed: () => _showDetailSheet(g.logs),
+    final groups = measurementMarkerGroups(measurements);
+    final points = measurementGroupMarkerPoints(groups);
+    return groups
+        .map(
+          (group) => Marker(
+            point: points[group.key]!,
+            width: 112,
+            height: 64,
+            child: MeasurementGroupMarkerLabel(
+              group: group,
+              onMarkerTap: (anchorContext) => showMeasurementGroupPopup(
+                context: context,
+                anchorContext: anchorContext,
+                group: group,
               ),
-            ))
+            ),
+          ),
+        )
         .toList();
   }
 
@@ -90,25 +93,32 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
     // Compute bounds using min/max.
-    final LatLng sw = markers.map((m) => m.point).reduce((a, b) =>
-        LatLng(
+    final LatLng sw = markers
+        .map((m) => m.point)
+        .reduce(
+          (a, b) => LatLng(
             a.latitude < b.latitude ? a.latitude : b.latitude,
-            a.longitude < b.longitude ? a.longitude : b.longitude));
-    final LatLng ne = markers.map((m) => m.point).reduce((a, b) =>
-        LatLng(
+            a.longitude < b.longitude ? a.longitude : b.longitude,
+          ),
+        );
+    final LatLng ne = markers
+        .map((m) => m.point)
+        .reduce(
+          (a, b) => LatLng(
             a.latitude > b.latitude ? a.latitude : b.latitude,
-            a.longitude > b.longitude ? a.longitude : b.longitude));
+            a.longitude > b.longitude ? a.longitude : b.longitude,
+          ),
+        );
     final bounds = LatLngBounds(sw, ne);
     _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.all(50),
-      ),
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)),
     );
   }
 
+  /* Retired marker detail bottom-sheet implementation. Marker labels now open
+     an anchored overlay.
   /// Bottomโ€‘sheet with measurement details.
-  void _showDetailSheet(List<SoilMeasurement> measurements) {
+  void _showDetailSheet(SoilMeasurement measurement) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -120,41 +130,36 @@ class _MapScreenState extends State<MapScreen> {
           controller: controller,
           padding: const EdgeInsets.all(16),
           children: [
-            Text('ข้อมูลหมุดนี้ ${measurements.length} รายการ', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              measurement.measurementName.isEmpty
+                  ? 'Measurement details'
+                  : measurement.measurementName,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             const Divider(),
-            ...measurements.reversed.map((m) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Recorded: ${m.timestamp}', style: const TextStyle(fontWeight: FontWeight.bold)),
-              _detailRow('Temperature', '${m.temperature.toStringAsFixed(1)} °C'),
-              _detailRow('Moisture', '${m.moisture.toStringAsFixed(1)} %'),
-              _detailRow('EC', '${m.ec} µS/cm'),
-              _detailRow('Salinity', '${m.salinity} mg/L'),
-              _detailRow('N', '${m.nitrogen} mg/kg'),
-              _detailRow('P', '${m.phosphorus} mg/kg'),
-              _detailRow('K', '${m.potassium} mg/kg'),
-              _detailRow('pH', m.ph.toStringAsFixed(2)),
-              const Divider(),
-            ])),
+            Text('Recorded: ${measurement.timestamp}',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            _detailRow('Temperature', '${measurement.temperature.toStringAsFixed(2)} °C'),
+            _detailRow('Moisture', '${measurement.moisture.toStringAsFixed(1)} %'),
+            _detailRow('EC', '${measurement.ec.toStringAsFixed(0)} µS/cm'),
+            _detailRow('Salinity', '${measurement.salinity.toStringAsFixed(0)} mg/L'),
+            _detailRow('N', '${measurement.nitrogen.toStringAsFixed(0)} mg/kg'),
+            _detailRow('P', '${measurement.phosphorus.toStringAsFixed(0)} mg/kg'),
+            _detailRow('K', '${measurement.potassium.toStringAsFixed(0)} mg/kg'),
+            _detailRow('pH', measurement.ph.toStringAsFixed(2)),
           ],
         ),
       ),
     );
   }
 
+  */
+
   @override
   void dispose() {
     _positionSubscription?.cancel();
     super.dispose();
   }
-
-  Widget _detailRow(String label, String value) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            Expanded(child: Text(label)),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-          ],
-        ),
-      );
 
   @override
   Widget build(BuildContext context) {
@@ -168,14 +173,25 @@ class _MapScreenState extends State<MapScreen> {
           }
           if (snapshot.hasError) {
             return Center(
-                child: Text('Error loading measurements: ${snapshot.error}'));
+              child: Text('Error loading measurements: ${snapshot.error}'),
+            );
           }
 
           final measurements = snapshot.data ?? [];
           final markers = _buildMarkers(measurements);
           if (_currentPosition != null) {
-            markers.add(Marker(point: _currentPosition!, width: 40, height: 40,
-              child: const Icon(Icons.my_location, color: Colors.red, size: 32)));
+            markers.add(
+              Marker(
+                point: _currentPosition!,
+                width: 40,
+                height: 40,
+                child: const Icon(
+                  Icons.my_location,
+                  color: Colors.red,
+                  size: 32,
+                ),
+              ),
+            );
           }
 
           // Fit camera after the first frame.

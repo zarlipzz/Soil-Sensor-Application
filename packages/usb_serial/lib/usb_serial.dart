@@ -120,7 +120,7 @@ class UsbPort extends AsyncDataSinkSource {
   /// You don't need to use this directly as you get UsbPort from
   /// [UsbDevice.create].
   factory UsbPort(String methodChannelName) {
-    return UsbPort._internal(MethodChannel(methodChannelName), EventChannel(methodChannelName + "/stream"));
+    return UsbPort._internal(MethodChannel(methodChannelName), EventChannel("$methodChannelName/stream"));
   }
 
   /// returns the asynchronous input stream.
@@ -137,9 +137,7 @@ class UsbPort extends AsyncDataSinkSource {
   ///
   @override
   Stream<Uint8List>? get inputStream {
-    if (_inputStream == null) {
-      _inputStream = _eventChannel.receiveBroadcastStream().map<Uint8List>((dynamic value) => value);
-    }
+    _inputStream ??= _eventChannel.receiveBroadcastStream().map<Uint8List>((dynamic value) => value);
     return _inputStream;
   }
 
@@ -195,7 +193,7 @@ class UsbPort extends AsyncDataSinkSource {
 
   /// return string name of databits
   String dataBitToString() {
-    switch (this._dataBits) {
+    switch (_dataBits) {
       case (5):
         return "DATABITS_5";
       case (6):
@@ -261,7 +259,7 @@ class UsbPort extends AsyncDataSinkSource {
 
   @override
   bool operator ==(other) {
-    if (!(other is UsbPort)) {
+    if (other is! UsbPort) {
       return false;
     }
     return _Equality.deepEq(_props, other._props);
@@ -335,15 +333,15 @@ class UsbDevice {
 
   @override
   bool operator ==(other) {
-    if (!(other is UsbDevice)) {
+    if (other is! UsbDevice) {
       return false;
     }
-    return this.deviceName == other.deviceName;
+    return deviceName == other.deviceName;
   }
 
   @override
   int get hashCode {
-    return this.deviceName.hashCode;
+    return deviceName.hashCode;
   }
 }
 
@@ -365,8 +363,8 @@ class UsbSerial {
   /// PL2303 Hardware USB to Uart bridge. (Fairly common) Used by [create]
   static const String PL2303 = "pl2303";
 
-  static const MethodChannel _channel = const MethodChannel('usb_serial');
-  static const EventChannel _eventChannel = const EventChannel('usb_serial/usb_events');
+  static const MethodChannel _channel = MethodChannel('usb_serial');
+  static const EventChannel _eventChannel = EventChannel('usb_serial/usb_events');
   static Stream<UsbEvent>? _eventStream;
 
   /// Use this stream to detect if a USB device is plugged in or removed.
@@ -386,14 +384,12 @@ class UsbSerial {
   /// }
   /// ```
   static Stream<UsbEvent>? get usbEventStream {
-    if (_eventStream == null) {
-      _eventStream = _eventChannel.receiveBroadcastStream().map<UsbEvent>((value) {
+    _eventStream ??= _eventChannel.receiveBroadcastStream().map<UsbEvent>((value) {
         UsbEvent msg = UsbEvent();
         msg.device = UsbDevice.fromJSON(value);
         msg.event = value["event"];
         return msg;
       });
-    }
     return _eventStream;
   }
 
@@ -417,7 +413,7 @@ class UsbSerial {
       return null;
     }
 
-    return new UsbPort(methodChannelName);
+    return UsbPort(methodChannelName);
   }
 
   /// Creates a UsbPort from deviceId optionally type and interface.
@@ -435,7 +431,7 @@ class UsbSerial {
       return null;
     }
 
-    return new UsbPort(methodChannelName);
+    return UsbPort(methodChannelName);
   }
 
   /// Returns a list of UsbDevices currently plugged in.

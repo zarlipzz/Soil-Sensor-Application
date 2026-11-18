@@ -5,15 +5,14 @@ class AppColors {
   AppColors._();
 
   // Primary green palette
-  static const Color softBlue = Color(
-    0xFF4CAF7D,
-  ); // primary green (replaces softBlue)
-  static const Color appbarBlue = Color(0xFF388E5A); // darker green appbar
+  static const Color softBlue = Color(0xFF167968); // META FARM teal green
+  static const Color appbarBlue = Color(0xFF103E3B); // deep soil green
+  static const Color disabledStart = Color(0xFF718A84);
   static const Color softGreyBackground = Color(
-    0xFFF1F8F4,
+    0xFFF4F7F5,
   ); // very light greenish bg
   static const Color lightBlueTint = Color(
-    0xFFE0F2EA,
+    0xFFE1F0EB,
   ); // light green tint for chips
 
   // Status & accent colors
@@ -27,19 +26,19 @@ class AppColors {
   static const Color tempColor = Color(0xFFE65100);
   static const Color phColor = Color(0xFF7B1FA2);
   static const Color ecColor = Color(0xFFF57F17);
-  static const Color nitrogenColor = Color(0xFF388E3C);
-  static const Color phosphorusColor = Color(0xFF4CAF7D);
-  static const Color potassiumColor = Color(0xFF5D4037);
-  static const Color salinityColor = Color(0xFF1565C0);
+  static const Color nitrogenColor = Color(0xFF167968);
+  static const Color phosphorusColor = Color(0xFF258F79);
+  static const Color potassiumColor = Color(0xFF315B4B);
+  static const Color salinityColor = Color(0xFF176B66);
 }
 
 /// Application-wide constants
 class AppConstants {
   AppConstants._();
 
-  static const String appTitle = 'Soil Multi-Parameter Monitor';
+  static const String appTitle = 'Meta Soil';
   static const String appSubtitle =
-      'CH340 USB Modbus RTU + Local Log & Home Assistant';
+      'CH340 USB Modbus RTU + Local Log & Data Hub';
 
   // Local storage keys
   static const String prefKeyLocationGroups = 'soil_location_groups_v1';

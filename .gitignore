@@ -46,3 +46,10 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Local Data Hub credentials
+/data-hub.local.json
+
+# Nested Android and Gradle build outputs
+**/.gradle/
+**/build/

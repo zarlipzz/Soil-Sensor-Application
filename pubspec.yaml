@@ -34,19 +34,23 @@ dependencies:
   cupertino_icons: ^1.0.8
   usb_serial:
     path: packages/usb_serial
-  firebase_core: ^5.1.0
   package_info_plus: ^10.2.2
-  cloud_firestore: ^7.1.0
+  device_info_plus: ^13.3.0
+  http: ^1.3.0
   shared_preferences: ^2.5.6
   geolocator: ^14.1.1
   flutter_map: ^6.2.1
   latlong2: ^0.9.0
+  share_plus: ^13.3.1
+  path_provider: ^2.1.6
 
 dev_dependencies:
   # Development only deps
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Required to mock the platform interface used by SharePlus.custom in tests.
+  share_plus_platform_interface: ^7.2.0
 
 # The following section is specific to Flutter packages.
 flutter:
@@ -54,6 +58,8 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/meta_soil_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
