@@ -21,7 +21,7 @@ void main() {
     );
     addTearDown(service.dispose);
     const endpoint = 'http://example.test:8099/api/ingest';
-    await service.saveSettings(
+    await service.saveCredentials(
       const DataHubSettings(url: endpoint, apiKey: 'test-key'),
     );
     final result = await service.uploadMeasurement(

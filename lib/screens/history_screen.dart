@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../utils/app_language.dart';
 import '../models/soil_measurement.dart';
 import '../widgets/measurement_detail.dart';
 
@@ -17,12 +19,17 @@ class HistoryScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('บันทึกในเครื่อง (${logs.length} รายการ)'),
+        title: Text(
+          context.tr(
+            'บันทึกในเครื่อง (${logs.length} รายการ)',
+            'Local logs (${logs.length} items)',
+          ),
+        ),
         actions: [
           if (logs.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_outline),
-              tooltip: 'ล้างบันทึกทั้งหมด',
+              tooltip: context.tr('ล้างบันทึกทั้งหมด', 'Clear all logs'),
               onPressed: () => _confirmClear(context),
             ),
         ],
@@ -38,8 +45,11 @@ class HistoryScreen extends StatelessWidget {
                     color: Colors.grey.shade400,
                   ),
                   const SizedBox(height: 12),
-                  const Text(
-                    'ยังไม่มีข้อมูลบันทึกในเครื่อง',
+                  Text(
+                    context.tr(
+                      'ยังไม่มีข้อมูลบันทึกในเครื่อง',
+                      'No local measurements yet',
+                    ),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
@@ -47,8 +57,11 @@ class HistoryScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'กดปุ่ม "อ่านค่าจากเซนเซอร์เดี๋ยวนี้" เพื่อบันทึกข้อมูลแรก',
+                  Text(
+                    context.tr(
+                      'กดปุ่ม "อ่านค่าจากเซนเซอร์เดี๋ยวนี้" เพื่อบันทึกข้อมูลแรก',
+                      'Tap Press to measure to save your first reading.',
+                    ),
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -73,17 +86,27 @@ class HistoryScreen extends StatelessWidget {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('ยืนยันล้างบันทึกในเครื่อง'),
-        content: const Text('คุณต้องการลบข้อมูล Local Log ทั้งหมดหรือไม่?'),
+        title: Text(
+          context.tr('ยืนยันล้างบันทึกในเครื่อง', 'Clear local logs?'),
+        ),
+        content: Text(
+          context.tr(
+            'คุณต้องการลบข้อมูล Local Log ทั้งหมดหรือไม่?',
+            'Delete all locally stored measurements?',
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('ยกเลิก'),
+            child: Text(context.tr('ยกเลิก', 'Cancel')),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('ลบทั้งหมด', style: TextStyle(color: Colors.white)),
+            child: Text(
+              context.tr('ลบทั้งหมด', 'Delete all'),
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),

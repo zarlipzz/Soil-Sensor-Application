@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+
+import '../utils/app_language.dart';
+
 import 'package:path_provider/path_provider.dart';
 
 import '../models/soil_measurement.dart';
 import '../services/measurement_export_service.dart';
 import '../utils/app_constants.dart';
+import '../utils/history_filters.dart';
 
 /// Modal sheet/dialog to export raw logs with selection checkboxes (All, by Name, by Date).
 class ExportDialog extends StatefulWidget {
@@ -22,41 +26,21 @@ class _ExportDialogState extends State<ExportDialog> {
   final Set<String> _selectedDates = {};
   bool _isExporting = false;
 
-  String _formatDate(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-  }
+  List<String> get _distinctNames =>
+      widget.records.map(measurementFilterName).toSet().toList()..sort();
 
-  List<String> get _distinctNames {
-    final names = <String>{};
-    for (final r in widget.records) {
-      final name = r.measurementName.trim().isEmpty
-          ? 'Unnamed'
-          : r.measurementName.trim();
-      names.add(name);
-    }
-    return names.toList()..sort();
-  }
-
-  List<String> get _distinctDates {
-    final dates = <String>{};
-    for (final r in widget.records) {
-      dates.add(_formatDate(r.timestamp));
-    }
-    return dates.toList()..sort((a, b) => b.compareTo(a));
-  }
+  Set<String> get _availableDates =>
+      availableMeasurementDates(widget.records, _selectedNames);
 
   List<SoilMeasurement> get _selectedRecords {
     if (_selectAll) return widget.records;
+    if (_selectedNames.isEmpty && _selectedDates.isEmpty) return const [];
     return widget.records.where((r) {
-      final name = r.measurementName.trim().isEmpty
-          ? 'Unnamed'
-          : r.measurementName.trim();
-      final date = _formatDate(r.timestamp);
-      final nameMatches =
-          _selectedNames.isEmpty || _selectedNames.contains(name);
+      final name = measurementFilterName(r);
+      final date = measurementFilterDate(r.timestamp);
       final dateMatches =
           _selectedDates.isEmpty || _selectedDates.contains(date);
-      return nameMatches && dateMatches;
+      return matchesMeasurementNames(name, _selectedNames) && dateMatches;
     }).toList();
   }
 
@@ -64,8 +48,13 @@ class _ExportDialogState extends State<ExportDialog> {
     final targets = _selectedRecords;
     if (targets.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('กรุณาเลือกอย่างน้อย 1 รายการเพื่อส่งออก'),
+        SnackBar(
+          content: Text(
+            context.tr(
+              'กรุณาเลือกอย่างน้อย 1 รายการเพื่อส่งออก',
+              'Select at least one item to export',
+            ),
+          ),
         ),
       );
       return;
@@ -90,7 +79,10 @@ class _ExportDialogState extends State<ExportDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'ส่งออกไฟล์ ${_format.toUpperCase()} เรียบร้อย (${targets.length} รายการ)',
+              context.tr(
+                'ส่งออกไฟล์ ${_format.toUpperCase()} เรียบร้อย (${targets.length} รายการ)',
+                'Exported ${targets.length} items as ${_format.toUpperCase()}',
+              ),
             ),
             backgroundColor: AppColors.softBlue,
           ),
@@ -100,7 +92,9 @@ class _ExportDialogState extends State<ExportDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('การส่งออกล้มเหลว: $e'),
+            content: Text(
+              context.tr('การส่งออกล้มเหลว: $e', 'Export failed: $e'),
+            ),
             backgroundColor: Colors.red,
           ),
         );
@@ -114,7 +108,8 @@ class _ExportDialogState extends State<ExportDialog> {
   Widget build(BuildContext context) {
     final selectedCount = _selectedRecords.length;
     final distinctNames = _distinctNames;
-    final distinctDates = _distinctDates;
+    final distinctDates = _availableDates.toList()
+      ..sort((a, b) => b.compareTo(a));
 
     return SafeArea(
       top: false,
@@ -131,9 +126,9 @@ class _ExportDialogState extends State<ExportDialog> {
                   color: AppColors.softBlue,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'ส่งออก Log (Raw File)',
+                    context.tr('ส่งออกข้อมูลดิบ', 'Export raw logs'),
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -154,8 +149,8 @@ class _ExportDialogState extends State<ExportDialog> {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       spacing: 8,
                       children: [
-                        const Text(
-                          'รูปแบบไฟล์: ',
+                        Text(
+                          context.tr('รูปแบบไฟล์: ', 'File format: '),
                           style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                         ChoiceChip(
@@ -172,13 +167,21 @@ class _ExportDialogState extends State<ExportDialog> {
                     ),
                     const Divider(height: 20),
                     // Selection options
-                    const Text(
-                      'เลือกข้อมูลที่จะส่งออก:',
+                    Text(
+                      context.tr(
+                        'เลือกข้อมูลที่จะส่งออก:',
+                        'Select items to export:',
+                      ),
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     CheckboxListTile(
                       dense: true,
-                      title: Text('ทั้งหมด (${widget.records.length} รายการ)'),
+                      title: Text(
+                        context.tr(
+                          'ทั้งหมด (${widget.records.length} รายการ)',
+                          'All (${widget.records.length} items)',
+                        ),
+                      ),
                       value: _selectAll,
                       activeColor: AppColors.softBlue,
                       onChanged: (val) {
@@ -193,13 +196,16 @@ class _ExportDialogState extends State<ExportDialog> {
                     ),
                     if (!_selectAll) ...[
                       if (distinctNames.isNotEmpty) ...[
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 4,
                           ),
                           child: Text(
-                            'เลือกตามชื่อการวัด:',
+                            context.tr(
+                              'เลือกตามชื่อการวัด:',
+                              'By measurement name:',
+                            ),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -221,6 +227,7 @@ class _ExportDialogState extends State<ExportDialog> {
                                   } else {
                                     _selectedNames.remove(name);
                                   }
+                                  _selectedDates.retainAll(_availableDates);
                                 });
                               },
                             );
@@ -228,13 +235,13 @@ class _ExportDialogState extends State<ExportDialog> {
                         ),
                       ],
                       if (distinctDates.isNotEmpty) ...[
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 4,
                           ),
                           child: Text(
-                            'เลือกตามวันที่:',
+                            context.tr('เลือกตามวันที่:', 'By date:'),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
@@ -269,10 +276,7 @@ class _ExportDialogState extends State<ExportDialog> {
             ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed:
-                  widget.records.isEmpty || _isExporting || selectedCount == 0
-                  ? null
-                  : _doExport,
+              onPressed: _isExporting || selectedCount == 0 ? null : _doExport,
               icon: _isExporting
                   ? const SizedBox(
                       width: 18,
@@ -285,12 +289,19 @@ class _ExportDialogState extends State<ExportDialog> {
                   : const Icon(Icons.share_rounded),
               label: Text(
                 _isExporting
-                    ? 'กำลังส่งออก...'
-                    : 'ส่งออก $selectedCount รายการ ($_format)',
+                    ? context.tr('กำลังส่งออก...', 'Exporting...')
+                    : selectedCount == 0
+                    ? context.tr('ส่งออก 0 รายการ', 'Export 0 items')
+                    : context.tr(
+                        'ส่งออก $selectedCount รายการ ($_format)',
+                        'Export $selectedCount items ($_format)',
+                      ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.softBlue,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey.shade300,
+                disabledForegroundColor: Colors.grey.shade700,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),

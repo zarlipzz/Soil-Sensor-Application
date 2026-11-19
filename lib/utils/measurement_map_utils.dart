@@ -51,10 +51,12 @@ class MeasurementMapGroup {
 /// in an existing group's popup, but never determines its marker location.
 /// No stored measurement is changed or merged.
 List<MeasurementMapGroup> measurementMarkerGroups(
-  Iterable<SoilMeasurement> measurements,
-) {
+  Iterable<SoilMeasurement> measurements, {
+  Set<String> hiddenMeasurementIds = const {},
+}) {
   final recordsByName = <String, List<SoilMeasurement>>{};
   for (final measurement in measurements) {
+    if (hiddenMeasurementIds.contains(measurement.id)) continue;
     final name = normalizedMeasurementName(measurement.measurementName) ??
         'Unnamed measurement';
     recordsByName.putIfAbsent(name, () => []).add(measurement);

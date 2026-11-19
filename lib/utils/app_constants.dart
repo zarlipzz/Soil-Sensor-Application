@@ -9,7 +9,7 @@ class AppColors {
   static const Color appbarBlue = Color(0xFF103E3B); // deep soil green
   static const Color disabledStart = Color(0xFF718A84);
   static const Color softGreyBackground = Color(
-    0xFFF4F7F5,
+    0xFFE9EFEA,
   ); // very light greenish bg
   static const Color lightBlueTint = Color(
     0xFFE1F0EB,

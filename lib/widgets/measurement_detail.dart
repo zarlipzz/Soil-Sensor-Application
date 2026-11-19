@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+
+import '../utils/app_language.dart';
 import '../models/soil_measurement.dart';
 import '../utils/app_constants.dart';
+import '../utils/app_fonts.dart';
 
 /// Reusable card displaying detailed historical log entry with sensor parameters and GPS coordinates.
 class MeasurementDetailCard extends StatelessWidget {
@@ -36,7 +39,10 @@ class MeasurementDetailCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.softBlue.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
@@ -53,16 +59,18 @@ class MeasurementDetailCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Text(
                       _formatDateTime(item.timestamp),
-                      style: const TextStyle(
+                      style: AppFonts.manropeSemiBold.copyWith(
                         fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
                         color: Color(0xFF1E293B),
                       ),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
                   decoration: BoxDecoration(
                     color: item.isSyncedToCloud
                         ? AppColors.lightBlueTint
@@ -82,7 +90,9 @@ class MeasurementDetailCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        item.isSyncedToCloud ? 'Synced' : 'Local Only',
+                        item.isSyncedToCloud
+                            ? context.tr('ส่งแล้ว', 'Synced')
+                            : context.tr('เก็บในเครื่อง', 'Local Only'),
                         style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.bold,
@@ -103,14 +113,42 @@ class MeasurementDetailCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 6,
               children: [
-                _buildSmallChip('Temp', '${item.temperature.toStringAsFixed(1)}°C', AppColors.tempColor),
-                _buildSmallChip('Moist', '${item.moisture.toStringAsFixed(1)}%', AppColors.moistureColor),
-                _buildSmallChip('pH', item.ph.toStringAsFixed(2), AppColors.phColor),
+                _buildSmallChip(
+                  context.tr('อุณหภูมิ', 'Temp'),
+                  '${item.temperature.toStringAsFixed(1)}°C',
+                  AppColors.tempColor,
+                ),
+                _buildSmallChip(
+                  context.tr('ความชื้น', 'Moist'),
+                  '${item.moisture.toStringAsFixed(1)}%',
+                  AppColors.moistureColor,
+                ),
+                _buildSmallChip(
+                  'pH',
+                  item.ph.toStringAsFixed(2),
+                  AppColors.phColor,
+                ),
                 _buildSmallChip('EC', '${item.ec} µS/cm', AppColors.ecColor),
-                _buildSmallChip('N', '${item.nitrogen}', AppColors.nitrogenColor),
-                _buildSmallChip('P', '${item.phosphorus}', AppColors.phosphorusColor),
-                _buildSmallChip('K', '${item.potassium}', AppColors.potassiumColor),
-                _buildSmallChip('Salinity', '${item.salinity} mg/L', AppColors.salinityColor),
+                _buildSmallChip(
+                  'N',
+                  '${item.nitrogen}',
+                  AppColors.nitrogenColor,
+                ),
+                _buildSmallChip(
+                  'P',
+                  '${item.phosphorus}',
+                  AppColors.phosphorusColor,
+                ),
+                _buildSmallChip(
+                  'K',
+                  '${item.potassium}',
+                  AppColors.potassiumColor,
+                ),
+                _buildSmallChip(
+                  context.tr('ความเค็ม', 'Salinity'),
+                  '${item.salinity} mg/L',
+                  AppColors.salinityColor,
+                ),
                 if (item.latitude != null && item.longitude != null)
                   _buildSmallChip(
                     'GPS',
@@ -133,8 +171,11 @@ class MeasurementDetailCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.2), width: 0.8),
       ),
-      child: Text(
-        '$label: $value',
+      child: Text.rich(
+        TextSpan(
+          text: '$label: ',
+          children: [TextSpan(text: value, style: AppFonts.manropeSemiBold)],
+        ),
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,

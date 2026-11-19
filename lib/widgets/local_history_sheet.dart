@@ -1,19 +1,29 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../utils/app_language.dart';
 
 import '../models/soil_measurement.dart';
 import '../utils/app_constants.dart';
+import '../utils/history_filters.dart';
 
 class LocalHistorySheet extends StatefulWidget {
   const LocalHistorySheet({
     super.key,
     required this.records,
     required this.scrollController,
+    required this.autoUploadMode,
+    required this.hasInternet,
+    required this.onAutoUploadChanged,
     required this.onClear,
     required this.onRetryPending,
   });
 
   final List<SoilMeasurement> records;
   final ScrollController scrollController;
+  final ValueListenable<bool?> autoUploadMode;
+  final ValueListenable<bool> hasInternet;
+  final Future<bool> Function(bool) onAutoUploadChanged;
   final Future<void> Function() onClear;
   final Future<String> Function() onRetryPending;
 
@@ -24,16 +34,40 @@ class LocalHistorySheet extends StatefulWidget {
 class _LocalHistorySheetState extends State<LocalHistorySheet> {
   final _searchController = TextEditingController();
   String _query = '';
-  bool _selectAll = true;
+  bool _selectAll = false;
   final Set<String> _selectedNames = {};
   final Set<String> _selectedDates = {};
+  bool _confirmedAll = false;
+  Set<String> _confirmedNames = {};
+  Set<String> _confirmedDates = {};
   bool _showFilterPanel = false;
+  bool _savingAutoUpload = false;
   bool _isRetrying = false;
   String? _retryMessage;
   Set<String> _retryIds = {};
 
+  Future<void> _changeAutoUpload(bool enabled) async {
+    if (_savingAutoUpload) return;
+    setState(() => _savingAutoUpload = true);
+    final saved = await widget.onAutoUploadChanged(enabled);
+    if (!mounted) return;
+    setState(() => _savingAutoUpload = false);
+    if (!saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.tr(
+              'บันทึกโหมดส่งข้อมูลอัตโนมัติไม่สำเร็จ',
+              'Could not save the automatic upload setting',
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _retryUploads() async {
-    if (_isRetrying) return;
+    if (_isRetrying || !widget.hasInternet.value) return;
     setState(() {
       _isRetrying = true;
       _retryMessage = null;
@@ -49,7 +83,10 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
       if (!mounted) return;
       setState(() {
         _isRetrying = false;
-        _retryMessage = 'ส่งรายการค้างไม่สำเร็จ กรุณาลองอีกครั้ง';
+        _retryMessage = context.tr(
+          'ส่งรายการค้างไม่สำเร็จ กรุณาลองอีกครั้ง',
+          'Could not send pending items. Please try again.',
+        );
       });
       return;
     }
@@ -66,43 +103,39 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
     super.dispose();
   }
 
-  void _toggleFilterPanel() {
+  void _toggleFilterPanel({bool confirm = false}) {
     FocusScope.of(context).unfocus();
     if (widget.scrollController.hasClients) {
       widget.scrollController.jumpTo(0);
     }
-    setState(() => _showFilterPanel = !_showFilterPanel);
+    setState(() {
+      if (!_showFilterPanel) {
+        _selectAll = _confirmedAll;
+        _selectedNames
+          ..clear()
+          ..addAll(_confirmedNames.where(_distinctNames.contains));
+        _selectedDates
+          ..clear()
+          ..addAll(_confirmedDates.where(_availableDates.contains));
+      } else if (confirm) {
+        _confirmedAll = _selectAll;
+        _confirmedNames = Set.of(_selectedNames);
+        _confirmedDates = Set.of(_selectedDates);
+      }
+      _showFilterPanel = !_showFilterPanel;
+    });
   }
 
-  String _formatDate(DateTime dt) {
-    return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
-  }
+  List<String> get _distinctNames =>
+      widget.records.map(measurementFilterName).toSet().toList()..sort();
 
-  List<String> get _distinctNames {
-    final names = <String>{};
-    for (final r in widget.records) {
-      final name = r.measurementName.trim().isEmpty
-          ? 'Unnamed'
-          : r.measurementName.trim();
-      names.add(name);
-    }
-    return names.toList()..sort();
-  }
-
-  List<String> get _distinctDates {
-    final dates = <String>{};
-    for (final r in widget.records) {
-      dates.add(_formatDate(r.timestamp));
-    }
-    return dates.toList()..sort((a, b) => b.compareTo(a));
-  }
+  Set<String> get _availableDates =>
+      availableMeasurementDates(widget.records, _selectedNames);
 
   List<SoilMeasurement> get _filteredRecords {
     return widget.records.where((r) {
-      final name = r.measurementName.trim().isEmpty
-          ? 'Unnamed'
-          : r.measurementName.trim();
-      final date = _formatDate(r.timestamp);
+      final name = measurementFilterName(r);
+      final date = measurementFilterDate(r.timestamp);
 
       // Check text search
       if (_query.isNotEmpty &&
@@ -112,21 +145,111 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
       }
 
       // Check checkbox selections
-      if (_selectAll) return true;
-
-      final nameMatches =
-          _selectedNames.isEmpty || _selectedNames.contains(name);
       final dateMatches =
-          _selectedDates.isEmpty || _selectedDates.contains(date);
-      return nameMatches && dateMatches;
+          _confirmedDates.isEmpty || _confirmedDates.contains(date);
+      return matchesMeasurementNames(name, _confirmedNames) && dateMatches;
     }).toList();
+  }
+
+  Widget _buildHeader(int filteredCount) {
+    final title = Row(
+      children: [
+        const Icon(Icons.history_rounded, color: AppColors.softBlue),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            context.tr(
+              'ประวัติในเครื่อง ($filteredCount/${widget.records.length})',
+              'Local history ($filteredCount/${widget.records.length})',
+            ),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
+    );
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: ValueListenableBuilder<bool?>(
+            valueListenable: widget.autoUploadMode,
+            builder: (context, enabled, _) => MergeSemantics(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      context.tr('ส่งข้อมูลอัตโนมัติ', 'Automatic uploads'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  Switch(
+                    value: enabled ?? false,
+                    onChanged: enabled == null || _savingAutoUpload
+                        ? null
+                        : _changeAutoUpload,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: _showFilterPanel
+              ? context.tr('ปิดตัวกรอง', 'Close filters')
+              : context.tr('ตัวกรอง', 'Filters'),
+          icon: Icon(
+            _showFilterPanel ? Icons.close : Icons.filter_alt_outlined,
+            color: _confirmedNames.isNotEmpty || _confirmedDates.isNotEmpty
+                ? Colors.orange
+                : AppColors.softBlue,
+          ),
+          onPressed: _toggleFilterPanel,
+        ),
+        IconButton(
+          tooltip: context.tr('ล้างประวัติทั้งหมด', 'Clear all history'),
+          onPressed: widget.records.isEmpty || _isRetrying
+              ? null
+              : widget.onClear,
+          icon: const Icon(Icons.delete_outline, color: Colors.red),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 420) {
+            return Column(
+              children: [
+                title,
+                Align(alignment: Alignment.centerRight, child: actions),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: title),
+              Expanded(
+                flex: 2,
+                child: Align(alignment: Alignment.centerRight, child: actions),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final filtered = _filteredRecords;
     final distinctNames = _distinctNames;
-    final distinctDates = _distinctDates;
+    final distinctDates = _availableDates.toList()
+      ..sort((a, b) => b.compareTo(a));
+    final hasSelection = widget.records.isNotEmpty &&
+        (_selectAll || _selectedNames.isNotEmpty || _selectedDates.isNotEmpty);
     final pendingCount = widget.records
         .where((record) => !record.isSyncedToCloud)
         .length;
@@ -147,63 +270,37 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
             borderRadius: BorderRadius.circular(2),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-          child: Row(
-            children: [
-              const Icon(Icons.history_rounded, color: AppColors.softBlue),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Local History (${filtered.length}/${widget.records.length})',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (_showFilterPanel)
-                TextButton.icon(
-                  onPressed: _toggleFilterPanel,
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('ยืนยัน'),
-                )
-              else
-                IconButton(
-                  tooltip: 'ตัวกรอง',
-                  icon: Icon(
-                    Icons.filter_alt_outlined,
-                    color: !_selectAll ? Colors.orange : AppColors.softBlue,
-                  ),
-                  onPressed: _toggleFilterPanel,
-                ),
-              IconButton(
-                tooltip: 'Clear all history',
-                onPressed: widget.records.isEmpty || _isRetrying
-                    ? null
-                    : widget.onClear,
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-              ),
-            ],
-          ),
-        ),
+        _buildHeader(filtered.length),
         if (!_showFilterPanel && (pendingCount > 0 || _isRetrying))
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: SizedBox(
               width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: _isRetrying ? null : _retryUploads,
-                icon: _isRetrying
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.cloud_upload_outlined),
-                label: Text(
-                  _isRetrying
-                      ? 'กำลังส่ง… สำเร็จ $sentDuringRetry/${_retryIds.length}'
-                      : 'ส่งรายการค้าง ($pendingCount)',
+              child: ValueListenableBuilder<bool>(
+                valueListenable: widget.hasInternet,
+                builder: (context, hasInternet, _) => FilledButton.icon(
+                  onPressed: !hasInternet || _isRetrying ? null : _retryUploads,
+                  style: FilledButton.styleFrom(
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    disabledForegroundColor: Colors.grey.shade700,
+                  ),
+                  icon: _isRetrying
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_upload_outlined),
+                  label: Text(
+                    _isRetrying
+                        ? context.tr(
+                            'กำลังส่ง… สำเร็จ $sentDuringRetry/${_retryIds.length}',
+                            'Sending… $sentDuringRetry/${_retryIds.length} sent',
+                          )
+                        : context.tr(
+                            'ส่งรายการค้าง ($pendingCount)',
+                            'Send pending items ($pendingCount)',
+                          ),
+                  ),
                 ),
               ),
             ),
@@ -221,7 +318,10 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
               controller: _searchController,
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, size: 20),
-                hintText: 'ค้นหาชื่อการวัด หรือ วันที่...',
+                hintText: context.tr(
+                  'ค้นหาชื่อการวัด หรือ วันที่...',
+                  'Search by name or date...',
+                ),
                 isDense: true,
                 border: const OutlineInputBorder(),
                 suffixIcon: _query.isNotEmpty
@@ -238,7 +338,7 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
             ),
           ),
         // Checkbox Filter panel (Requirement 8)
-        if (_showFilterPanel)
+        if (_showFilterPanel) ...[
           Expanded(
             child: ListView(
               key: const ValueKey('history-filters'),
@@ -260,8 +360,11 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                     children: [
                       Row(
                         children: [
-                          const Text(
-                            'เลือกดูข้อมูล:',
+                          Text(
+                            context.tr(
+                              'เลือกดูข้อมูล:',
+                              'Filter measurements:',
+                            ),
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 13,
@@ -281,8 +384,8 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                               });
                             },
                           ),
-                          const Text(
-                            'ทั้งหมด',
+                          Text(
+                            context.tr('ทั้งหมด', 'All'),
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 13,
@@ -293,8 +396,11 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                       if (!_selectAll) ...[
                         if (distinctNames.isNotEmpty) ...[
                           const Divider(height: 12),
-                          const Text(
-                            'ติ๊กเลือกชื่อการวัด:',
+                          Text(
+                            context.tr(
+                              'ติ๊กเลือกชื่อการวัด:',
+                              'By measurement name:',
+                            ),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -322,6 +428,7 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                                     } else {
                                       _selectedNames.remove(name);
                                     }
+                                    _selectedDates.retainAll(_availableDates);
                                   });
                                 },
                               );
@@ -330,8 +437,8 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                         ],
                         if (distinctDates.isNotEmpty) ...[
                           const Divider(height: 12),
-                          const Text(
-                            'ติ๊กเลือกวันที่:',
+                          Text(
+                            context.tr('ติ๊กเลือกวันที่:', 'By date:'),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
@@ -371,16 +478,42 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                 ),
               ],
             ),
-          )
-        else ...[
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: hasSelection
+                    ? () => _toggleFilterPanel(confirm: true)
+                    : null,
+                icon: const Icon(Icons.check_rounded),
+                label: Text(context.tr('ยืนยัน', 'Confirm')),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.softBlue,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade700,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ),
+        ] else ...[
           const Divider(height: 1),
           Expanded(
             child: filtered.isEmpty
                 ? Center(
                     child: Text(
                       widget.records.isEmpty
-                          ? 'ยังไม่มีข้อมูลการวัดในเครื่อง'
-                          : 'ไม่พบรายการที่ตรงกับตัวกรองที่เลือก',
+                          ? context.tr(
+                              'ยังไม่มีข้อมูลการวัดในเครื่อง',
+                              'No local measurements yet',
+                            )
+                          : context.tr(
+                              'ไม่พบรายการที่ตรงกับตัวกรองที่เลือก',
+                              'No measurements match the selected filters',
+                            ),
                       style: const TextStyle(color: Colors.grey),
                     ),
                   )
@@ -391,7 +524,7 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                     itemBuilder: (context, index) {
                       final record = filtered[index];
                       final title = record.measurementName.trim().isEmpty
-                          ? 'Unnamed measurement'
+                          ? context.tr('การวัดไม่มีชื่อ', 'Unnamed measurement')
                           : record.measurementName.trim();
                       return ListTile(
                         dense: true,
@@ -401,11 +534,14 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                           size: 20,
                         ),
                         title: Text(
-                          '$title — ${_formatDate(record.timestamp)} ${record.timestamp.hour.toString().padLeft(2, '0')}:${record.timestamp.minute.toString().padLeft(2, '0')}',
+                          '$title — ${measurementFilterDate(record.timestamp)} ${record.timestamp.hour.toString().padLeft(2, '0')}:${record.timestamp.minute.toString().padLeft(2, '0')}',
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         subtitle: Text(
-                          'ความชื้น ${record.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+                          context.tr(
+                            'ความชื้น ${record.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+                            'Moisture ${record.moisture.toStringAsFixed(1)}% · Temperature ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+                          ),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -421,7 +557,9 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              record.isSyncedToCloud ? 'ส่งแล้ว' : 'ค้างส่ง',
+                              record.isSyncedToCloud
+                                  ? context.tr('ส่งแล้ว', 'Sent')
+                                  : context.tr('ค้างส่ง', 'Pending'),
                             ),
                           ],
                         ),
@@ -447,7 +585,7 @@ class HistoryRecordDetails extends StatelessWidget {
   Widget build(BuildContext context) => AlertDialog(
     title: Text(
       record.measurementName.trim().isEmpty
-          ? 'Unnamed measurement'
+          ? context.tr('การวัดไม่มีชื่อ', 'Unnamed measurement')
           : record.measurementName,
     ),
     content: SizedBox(
@@ -457,46 +595,68 @@ class HistoryRecordDetails extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('ID: ${record.id}'),
-            Text('Recorded: ${record.timestamp}'),
+            Text(
+              context.tr(
+                'บันทึกเมื่อ: ${record.timestamp}',
+                'Recorded: ${record.timestamp}',
+              ),
+            ),
             const Divider(),
             _value(
-              'ความชื้น (Moisture)',
+              context.tr('ความชื้น (Moisture)', 'Moisture'),
               '${record.moisture.toStringAsFixed(1)} %',
             ),
             _value(
-              'อุณหภูมิ (Temperature)',
+              context.tr('อุณหภูมิ (Temperature)', 'Temperature'),
               '${record.temperature.toStringAsFixed(2)} °C',
             ),
             _value('pH', record.ph.toStringAsFixed(2)),
             _value('EC', '${record.ec} µS/cm'),
-            _value('ไนโตรเจน (N)', '${record.nitrogen} mg/kg'),
-            _value('ฟอสฟอรัส (P)', '${record.phosphorus} mg/kg'),
-            _value('โพแทสเซียม (K)', '${record.potassium} mg/kg'),
-            _value('ความเค็ม (Salinity)', '${record.salinity} mg/L'),
+            _value(
+              context.tr('ไนโตรเจน (N)', 'Nitrogen (N)'),
+              '${record.nitrogen} mg/kg',
+            ),
+            _value(
+              context.tr('ฟอสฟอรัส (P)', 'Phosphorus (P)'),
+              '${record.phosphorus} mg/kg',
+            ),
+            _value(
+              context.tr('โพแทสเซียม (K)', 'Potassium (K)'),
+              '${record.potassium} mg/kg',
+            ),
+            _value(
+              context.tr('ความเค็ม (Salinity)', 'Salinity'),
+              '${record.salinity} mg/L',
+            ),
             if (record.latitude != null && record.longitude != null)
               _value(
                 'GPS',
                 '${record.latitude}, ${record.longitude} (±${record.gpsAccuracy?.toStringAsFixed(0) ?? "?"}m)',
               ),
-            _value('Device ID', record.deviceId),
+            _value(context.tr('รหัสอุปกรณ์', 'Device ID'), record.deviceId),
             if (record.deviceMetadata.isNotEmpty) ...[
               const Divider(),
-              const Text(
-                'Device metadata',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              Text(
+                context.tr('ข้อมูลอุปกรณ์', 'Device metadata'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               ...record.deviceMetadata.entries.map(
                 (entry) => _value(entry.key, '${entry.value}'),
               ),
             ],
             _value(
-              'Home Assistant Sync',
-              record.isSyncedToCloud ? 'Synced' : 'Not synced',
+              context.tr('สถานะการส่งข้อมูล', 'Sync status'),
+              record.isSyncedToCloud
+                  ? context.tr('ส่งแล้ว', 'Synced')
+                  : context.tr('ยังไม่ส่ง', 'Not synced'),
             ),
             if (record.rawSamples.isNotEmpty) ...[
               const Divider(),
               Text(
-                'Raw samples (${record.rawSamples.length})',
+                context.tr(
+                  'ค่าดิบ (${record.rawSamples.length})',
+                  'Raw samples (${record.rawSamples.length})',
+                ),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               ...record.rawSamples.asMap().entries.map(
@@ -513,7 +673,7 @@ class HistoryRecordDetails extends StatelessWidget {
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context),
-        child: const Text('Close'),
+        child: Text(context.tr('ปิด', 'Close')),
       ),
     ],
   );

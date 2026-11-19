@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../utils/app_language.dart';
+
 import '../services/gps_service.dart';
 import '../utils/app_constants.dart';
 
@@ -28,10 +30,16 @@ class DeviceStatusIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final statusText = kIsWeb
-        ? 'โหมดทดสอบจำลอง (Web Preview Mode)'
+        ? context.tr('โหมดทดสอบจำลอง (Web Preview Mode)', 'Web preview mode')
         : (isDeviceConnected
-              ? 'เซนเซอร์ USB เชื่อมต่อแล้ว (CH340 Ready)'
-              : 'รอเสียบสายเซนเซอร์ USB OTG');
+              ? context.tr(
+                  'เซนเซอร์ USB เชื่อมต่อแล้ว (CH340 Ready)',
+                  'USB sensor connected (CH340 ready)',
+                )
+              : context.tr(
+                  'รอเสียบสายเซนเซอร์ USB OTG',
+                  'Connect the USB OTG sensor cable',
+                ));
 
     final statusColor = kIsWeb
         ? AppColors.softBlue
@@ -66,7 +74,10 @@ class DeviceStatusIndicator extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'อัปเดตล่าสุด: ${_formatTime(lastUpdated)}',
+                    context.tr(
+                      'อัปเดตล่าสุด: ${_formatTime(lastUpdated)}',
+                      'Last updated: ${_formatTime(lastUpdated)}',
+                    ),
                     style: const TextStyle(fontSize: 11, color: Colors.black54),
                   ),
                 ],
@@ -82,9 +93,12 @@ class DeviceStatusIndicator extends StatelessWidget {
                 ),
               )
             else
-              const Tooltip(
-                message: 'พร้อมส่งข้อมูลไปยัง Home Assistant',
-                child: Icon(
+              Tooltip(
+                message: context.tr(
+                  'พร้อมส่งข้อมูลไปยัง Home Assistant',
+                  'Ready to send data to Home Assistant',
+                ),
+                child: const Icon(
                   Icons.cloud_done_rounded,
                   color: AppColors.softBlue,
                   size: 20,
@@ -114,7 +128,10 @@ class DeviceStatusIndicator extends StatelessWidget {
                   child: Text(
                     gpsLocation != null
                         ? 'GPS: ${gpsLocation!.latitude.toStringAsFixed(5)}, ${gpsLocation!.longitude.toStringAsFixed(5)} (±${gpsLocation!.accuracy.toStringAsFixed(0)}m)'
-                        : 'GPS: กำลังค้นหาสัญญาณตำแหน่ง...',
+                        : context.tr(
+                            'GPS: กำลังค้นหาสัญญาณตำแหน่ง...',
+                            'GPS: Searching for location...',
+                          ),
                     style: const TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w500,

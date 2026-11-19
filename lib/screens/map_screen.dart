@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+
+import '../utils/app_language.dart';
+
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/soil_measurement.dart';
 import '../services/local_storage_service.dart';
+import '../services/map_pin_visibility.dart';
 import '../services/gps_service.dart';
 import '../utils/measurement_map_utils.dart';
 import '../widgets/measurement_group_popup.dart';
@@ -34,7 +38,9 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _storage = LocalStorageService();
-    _loadFuture = _storage.loadMeasurements();
+    _loadFuture = MapPinVisibility.instance.load().then(
+      (_) => _storage.loadMeasurements(),
+    );
     _startLocationTracking();
   }
 
@@ -42,8 +48,9 @@ class _MapScreenState extends State<MapScreen> {
     final enabled = await _gpsService.isLocationServiceEnabled();
     if (!enabled || !await _gpsService.requestPermission()) return;
     final loc = await _gpsService.getCurrentLocation();
-    if (mounted && loc != null)
+    if (mounted && loc != null) {
       setState(() => _currentPosition = LatLng(loc.latitude, loc.longitude));
+    }
     _positionSubscription =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
@@ -60,7 +67,10 @@ class _MapScreenState extends State<MapScreen> {
 
   /// Build markers from measurements that contain GPS and have valid finite coordinates.
   List<Marker> _buildMarkers(List<SoilMeasurement> measurements) {
-    final groups = measurementMarkerGroups(measurements);
+    final groups = measurementMarkerGroups(
+      measurements,
+      hiddenMeasurementIds: MapPinVisibility.instance.value,
+    );
     final points = measurementGroupMarkerPoints(groups);
     return groups
         .map(
@@ -132,20 +142,20 @@ class _MapScreenState extends State<MapScreen> {
           children: [
             Text(
               measurement.measurementName.isEmpty
-                  ? 'Measurement details'
+                  ? context.tr('รายละเอียดการวัด', 'Measurement details')
                   : measurement.measurementName,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             const Divider(),
-            Text('Recorded: ${measurement.timestamp}',
+            Text(context.tr('บันทึกเมื่อ: ${measurement.timestamp}', 'Recorded: ${measurement.timestamp}'),
                 style: const TextStyle(fontWeight: FontWeight.bold)),
-            _detailRow('Temperature', '${measurement.temperature.toStringAsFixed(2)} °C'),
-            _detailRow('Moisture', '${measurement.moisture.toStringAsFixed(1)} %'),
+            _detailRow(context.tr('อุณหภูมิ', 'Temperature'), '${measurement.temperature.toStringAsFixed(2)} °C'),
+            _detailRow(context.tr('ความชื้น', 'Moisture'), '${measurement.moisture.toStringAsFixed(1)} %'),
             _detailRow('EC', '${measurement.ec.toStringAsFixed(0)} µS/cm'),
-            _detailRow('Salinity', '${measurement.salinity.toStringAsFixed(0)} mg/L'),
-            _detailRow('N', '${measurement.nitrogen.toStringAsFixed(0)} mg/kg'),
-            _detailRow('P', '${measurement.phosphorus.toStringAsFixed(0)} mg/kg'),
-            _detailRow('K', '${measurement.potassium.toStringAsFixed(0)} mg/kg'),
+            _detailRow(context.tr('ความเค็ม', 'Salinity'), '${measurement.salinity.toStringAsFixed(0)} mg/L'),
+            _detailRow(context.tr('ไนโตรเจน', 'N'), '${measurement.nitrogen.toStringAsFixed(0)} mg/kg'),
+            _detailRow(context.tr('ฟอสฟอรัส', 'P'), '${measurement.phosphorus.toStringAsFixed(0)} mg/kg'),
+            _detailRow(context.tr('โพแทสเซียม', 'K'), '${measurement.potassium.toStringAsFixed(0)} mg/kg'),
             _detailRow('pH', measurement.ph.toStringAsFixed(2)),
           ],
         ),
@@ -164,61 +174,64 @@ class _MapScreenState extends State<MapScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Soil Field Map')),
-      body: FutureBuilder<List<SoilMeasurement>>(
-        future: _loadFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Text('Error loading measurements: ${snapshot.error}'),
-            );
-          }
-
-          final measurements = snapshot.data ?? [];
-          final markers = _buildMarkers(measurements);
-          if (_currentPosition != null) {
-            markers.add(
-              Marker(
-                point: _currentPosition!,
-                width: 40,
-                height: 40,
-                child: const Icon(
-                  Icons.my_location,
-                  color: Colors.red,
-                  size: 32,
-                ),
-              ),
-            );
-          }
-
-          // Fit camera after the first frame.
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _fitCamera(markers);
-          });
-
-          return FlutterMap(
-            mapController: _mapController,
-            options: const MapOptions(
-              initialCenter: LatLng(0, 0),
-              initialZoom: 2,
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.soil_app',
-              ),
-              const SimpleAttributionWidget(
-                source: Text('ยฉ OpenStreetMap contributors'),
-                alignment: Alignment.bottomRight,
-              ),
-              MarkerLayer(markers: markers),
-            ],
-          );
-        },
+      appBar: AppBar(title: Text(context.tr('แผนที่แปลง', 'Soil Field Map'))),
+      body: ListenableBuilder(
+        listenable: MapPinVisibility.instance,
+        builder: (context, _) => _buildMapBody(),
       ),
     );
   }
+
+  Widget _buildMapBody() => FutureBuilder<List<SoilMeasurement>>(
+    future: _loadFuture,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      if (snapshot.hasError) {
+        return Center(
+          child: Text(
+            context.tr(
+              'โหลดข้อมูลการวัดไม่สำเร็จ: ${snapshot.error}',
+              'Error loading measurements: ${snapshot.error}',
+            ),
+          ),
+        );
+      }
+
+      final measurements = snapshot.data ?? [];
+      final markers = _buildMarkers(measurements);
+      if (_currentPosition != null) {
+        markers.add(
+          Marker(
+            point: _currentPosition!,
+            width: 40,
+            height: 40,
+            child: const Icon(Icons.my_location, color: Colors.red, size: 32),
+          ),
+        );
+      }
+
+      // Fit camera after the first frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _fitCamera(markers);
+      });
+
+      return FlutterMap(
+        mapController: _mapController,
+        options: const MapOptions(initialCenter: LatLng(0, 0), initialZoom: 2),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.soil_app',
+          ),
+          const SimpleAttributionWidget(
+            source: Text('ยฉ OpenStreetMap contributors'),
+            alignment: Alignment.bottomRight,
+          ),
+          MarkerLayer(markers: markers),
+        ],
+      );
+    },
+  );
 }

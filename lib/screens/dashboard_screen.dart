@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart' hide Path;
@@ -12,9 +13,13 @@ import '../services/device_identity_service.dart';
 import '../services/gps_service.dart';
 import '../services/home_assistant_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/map_pin_visibility.dart';
+import '../services/measurement_name_history_service.dart';
 import '../services/measurement_engine.dart';
 import '../services/usb_serial_service.dart';
 import '../utils/app_constants.dart';
+import '../utils/app_fonts.dart';
+import '../utils/app_language.dart';
 import '../utils/measurement_map_utils.dart';
 import '../utils/measurement_name.dart';
 import '../widgets/data_hub_settings_dialog.dart';
@@ -26,7 +31,9 @@ import '../widgets/sensor_card.dart';
 
 /// Main Dashboard Screen displaying realtime metrics, hardware state, and controls.
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, this.dataHubService});
+
+  final HomeAssistantService? dataHubService;
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -35,16 +42,26 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _portraitStartDiameter = 88.0;
   static const _sensorGridSpacing = 6.0;
+  static const _uploadDelay = Duration(seconds: 7);
+  static const _uploadRetryDelay = Duration(seconds: 30);
+  static const _networkEvents = EventChannel('com.soil.sensor.soil_app/network');
 
   // ----- Service instances -----
   final LocalStorageService _storageService = LocalStorageService();
   final UsbSerialService _usbService = UsbSerialService();
   final GpsService _gpsService = GpsService();
-  final HomeAssistantService _homeAssistantService = HomeAssistantService();
+  late final _homeAssistantService =
+      widget.dataHubService ?? HomeAssistantService();
+  final MeasurementNameHistoryService _nameHistoryService =
+      MeasurementNameHistoryService();
   final DeviceIdentityService _deviceIdentityService = DeviceIdentityService();
   final MeasurementEngine _measurementEngine = MeasurementEngine();
   final TextEditingController _measurementNameController =
       TextEditingController();
+  final FocusNode _measurementNameFocusNode = FocusNode();
+  final MenuController _measurementNameMenu = MenuController();
+  bool get _isSettingsName =>
+      _measurementNameController.text.trim() == dataHubSettingsCommand;
 
   // ----- State variables -----
   final _logs = ValueNotifier<List<SoilMeasurement>>([]);
@@ -53,6 +70,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _activeUploads = <String, Future<DataHubUploadResult>>{};
   final _acceptedUploads = <String>{};
   Future<String>? _pendingRetry;
+  bool _manualUploadRequested = false;
+  final _autoUploadMode = ValueNotifier<bool?>(null);
+  bool get _autoUploadEnabled => _autoUploadMode.value ?? false;
+  final _hasInternet = ValueNotifier(
+    kIsWeb || defaultTargetPlatform != TargetPlatform.android,
+  );
+  int? _networkHandle;
+  int _autoUploadGeneration = 0;
+  Timer? _autoUploadTimer;
+  StreamSubscription<Object?>? _networkSubscription;
   int _seenLogCount = 0;
   SoilMeasurement _currentData = SoilMeasurement.initial();
   UsbConnectionStatus _usbStatus = UsbConnectionStatus.disconnected;
@@ -63,6 +90,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _countdownTimer;
   String? _activeMeasurementName;
   String? _measurementNameError;
+  List<String> _measurementNameHistory = [];
   DeviceIdentity? _deviceIdentity;
   Timer? _nextSampleTimer;
   GpsLocationData? _currentGpsLocation;
@@ -76,24 +104,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _initServices() async {
     _loadDeviceIdentity();
+    await MapPinVisibility.instance.load();
     // Load cached logs
     final logs = await _storageService.loadMeasurements();
-    if (mounted) {
-      setState(() {
-        _logs.value = logs;
-        if (_localLogs.isNotEmpty) {
-          _currentData = _localLogs.first;
-        }
-      });
+    List<String> names = [];
+    try {
+      names = await _nameHistoryService.load(
+        logs.map((record) => record.measurementName),
+      );
+    } catch (error) {
+      debugPrint('[DashboardScreen] Name history unavailable: $error');
     }
+    if (!mounted) return;
+    setState(() {
+      _logs.value = logs;
+      _measurementNameHistory = names;
+      if (_localLogs.isNotEmpty) {
+        _currentData = _localLogs.first;
+      }
+    });
 
     // USB status callbacks
     _usbService.onStatusChanged = (status) {
       if (!mounted) return;
       setState(() => _usbStatus = status);
-      if (status == UsbConnectionStatus.disconnected ||
-          status == UsbConnectionStatus.permissionDenied ||
-          status == UsbConnectionStatus.connectionFailed) {
+      if (_measurementEngine.isCollecting &&
+          (status == UsbConnectionStatus.disconnected ||
+              status == UsbConnectionStatus.permissionDenied ||
+              status == UsbConnectionStatus.connectionFailed)) {
         _stopMeasurement();
       }
     };
@@ -107,6 +145,102 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Initialise USB detection and GPS
     _usbService.initialize();
     _startGpsTracking();
+    unawaited(_initAutoUpload());
+  }
+
+  Future<void> _initAutoUpload() async {
+    var enabled = false;
+    try {
+      final settings = await _homeAssistantService.loadSettings();
+      enabled = settings.autoUpload;
+    } catch (_) {
+      debugPrint('[Data Hub] Could not load automatic upload settings.');
+    }
+    if (!mounted) return;
+    _autoUploadMode.value = enabled;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    _networkSubscription = _networkEvents.receiveBroadcastStream().listen(
+      (event) {
+        final status = event as Map<Object?, Object?>;
+        _updateUploadNetwork(
+          status['network'] as int?,
+          status['hasInternet'] == true,
+        );
+      },
+      onError: (Object _) => _updateUploadNetwork(null, false),
+    );
+  }
+
+  Future<bool> _setAutoUpload(bool enabled) async {
+    try {
+      if (!await _homeAssistantService.saveAutoUpload(enabled)) return false;
+    } catch (_) {
+      return false;
+    }
+    if (mounted) {
+      _autoUploadMode.value = enabled;
+      _resetAutoUpload();
+    }
+    return true;
+  }
+
+  void _updateUploadNetwork(int? networkHandle, bool hasInternet) {
+    if (!mounted) return;
+    _hasInternet.value = hasInternet;
+    if (_networkHandle == networkHandle) return;
+    _networkHandle = networkHandle;
+    _resetAutoUpload();
+  }
+
+  void _resetAutoUpload() {
+    _autoUploadGeneration++;
+    _autoUploadTimer?.cancel();
+    _autoUploadTimer = null;
+    _scheduleAutoUpload();
+  }
+
+  bool get _canAutoUpload =>
+      mounted && _autoUploadEnabled && _networkHandle != null;
+
+  void _scheduleAutoUpload([Duration delay = _uploadDelay]) {
+    if (!_canAutoUpload ||
+        _autoUploadTimer != null ||
+        !_localLogs.any((record) => !record.isSyncedToCloud)) {
+      return;
+    }
+    final generation = _autoUploadGeneration;
+    _autoUploadTimer = Timer(delay, () async {
+      // Share the existing upload queue if a manual or prior run is finishing.
+      await _pendingRetry;
+      if (!_canAutoUpload || generation != _autoUploadGeneration) return;
+      _autoUploadTimer = null;
+      await _startPendingUploads(generation);
+    });
+  }
+
+  Future<void> _rememberMeasurementName(String name) async {
+    try {
+      final names = await _queueLogWrite(
+        () => _nameHistoryService.remember(name),
+      );
+      if (mounted) setState(() => _measurementNameHistory = names);
+    } catch (error) {
+      debugPrint('[DashboardScreen] Could not save name history: $error');
+    }
+  }
+
+  Future<void> _removeMeasurementName(String name) async {
+    try {
+      final names = await _queueLogWrite(
+        () => _nameHistoryService.remove(name),
+      );
+      if (mounted) {
+        if (names.isEmpty) _measurementNameMenu.close();
+        setState(() => _measurementNameHistory = names);
+      }
+    } catch (error) {
+      debugPrint('[DashboardScreen] Could not remove name history: $error');
+    }
   }
 
   Future<void> _startGpsTracking() async {
@@ -136,13 +270,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _measurementNameController.dispose();
+    _measurementNameFocusNode.dispose();
     _nextSampleTimer?.cancel();
     _countdownTimer?.cancel();
+    _autoUploadTimer?.cancel();
+    _networkSubscription?.cancel();
     _measurementEngine.dispose();
     _gpsPositionSubscription?.cancel();
     _usbService.dispose();
-    _homeAssistantService.dispose();
+    if (widget.dataHubService == null) _homeAssistantService.dispose();
     _logs.dispose();
+    _autoUploadMode.dispose();
+    _hasInternet.dispose();
     super.dispose();
   }
 
@@ -169,17 +308,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _completeMeasurement(List<SoilSample> samples) async {
     _nextSampleTimer?.cancel();
     _countdownTimer?.cancel();
+    try {
+      await _finishMeasurement(samples);
+    } catch (error) {
+      debugPrint('[DashboardScreen] Could not complete measurement: $error');
+      if (mounted) {
+        _stopMeasurement(
+          context.tr(
+            'บันทึกการวัดไม่สำเร็จ',
+            'Could not complete the measurement',
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _finishMeasurement(List<SoilSample> samples) async {
+    final timestamp = _measurementEngine.completedAt;
+    final name = _activeMeasurementName ?? '';
     final identity =
         _deviceIdentity ?? await _deviceIdentityService.getIdentity();
     final gps = await _gpsService.getCurrentLocation();
-    final timestamp = _measurementEngine.completedAt;
     final measurement = SoilMeasurement.fromAveragedSamples(
       id: 'MEAS-${timestamp.millisecondsSinceEpoch}',
       rawSamples: samples,
       timestamp: timestamp,
       deviceId: identity.id,
       deviceMetadata: identity.metadata,
-      measurementName: _activeMeasurementName ?? '',
+      measurementName: name,
       latitude: gps?.latitude,
       longitude: gps?.longitude,
       gpsAccuracy: gps?.accuracy,
@@ -255,26 +411,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('บันทึกข้อมูลลงเครื่องไม่สำเร็จ')),
+          SnackBar(
+            content: Text(
+              context.tr(
+                'บันทึกข้อมูลลงเครื่องไม่สำเร็จ',
+                'Could not save the measurement on this device',
+              ),
+            ),
+          ),
         );
       }
       return;
     }
     if (!mounted) return;
-    final result = await _uploadSavedMeasurement(measurement);
-    if (!mounted) return;
-    final message = switch (result) {
-      DataHubUploadResult.uploaded =>
-        'บันทึกลงเครื่องและส่งไปยัง Data Hub แล้ว',
-      DataHubUploadResult.notConfigured =>
-        'บันทึกลงเครื่องแล้ว ตั้งค่า Data Hub แล้วส่งซ้ำจากหน้า Log ได้',
-      DataHubUploadResult.failed =>
-        'ส่งไปยัง Data Hub ไม่สำเร็จ บันทึกไว้แล้วและส่งซ้ำจากหน้า Log ได้',
-      DataHubUploadResult.statusNotSaved =>
-        'Data Hub รับข้อมูลแล้ว แต่บันทึกสถานะการส่งลงเครื่องไม่สำเร็จ',
-    };
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    _scheduleAutoUpload();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _autoUploadEnabled
+              ? context.tr(
+                  'บันทึกลงเครื่องแล้ว รอส่งไปยัง Data Hub',
+                  'Saved on this device. Waiting to send to Data Hub.',
+                )
+              : context.tr(
+                  'บันทึกลงเครื่องแล้ว กดส่งข้อมูลได้จากหน้า Log',
+                  'Saved on this device. Send it from Local Logs.',
+                ),
+        ),
+      ),
+    );
   }
 
   Future<DataHubUploadResult> _uploadSavedMeasurement(
@@ -320,30 +485,76 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return result;
   }
 
-  Future<String> _retryPendingUploads() => _pendingRetry ??= _sendPendingLogs()
-      .whenComplete(() => _pendingRetry = null);
+  Future<String> _retryPendingUploads() {
+    if (!_hasInternet.value) {
+      return Future.value(
+        context.tr('ยังไม่ได้เชื่อมต่ออินเทอร์เน็ต', 'No internet connection'),
+      );
+    }
+    _manualUploadRequested = true;
+    return _startPendingUploads();
+  }
 
-  Future<String> _sendPendingLogs() async {
+  Future<String> _startPendingUploads([int? generation]) =>
+      _pendingRetry ??= _sendPendingLogs(generation).whenComplete(() {
+        _pendingRetry = null;
+        _manualUploadRequested = false;
+      });
+
+  Future<String> _sendPendingLogs(int? generation) async {
     final pending = _localLogs.reversed
         .where((record) => !record.isSyncedToCloud)
         .toList();
-    if (pending.isEmpty) return 'ไม่มีรายการค้างส่ง';
+    if (pending.isEmpty) {
+      return context.tr('ไม่มีรายการค้างส่ง', 'No pending measurements');
+    }
     var sent = 0;
     for (final record in pending) {
-      if (!mounted) break;
+      if (!mounted) return '';
+      if (_manualUploadRequested && !_hasInternet.value) {
+        return context.tr(
+          'ส่งสำเร็จ $sent รายการ อินเทอร์เน็ตขาดการเชื่อมต่อ',
+          'Sent $sent. The internet connection was lost.',
+        );
+      }
+      if (!_manualUploadRequested &&
+          (!_canAutoUpload || generation != _autoUploadGeneration)) {
+        break;
+      }
       final result = await _uploadSavedMeasurement(record);
+      if (!mounted) return '';
       switch (result) {
         case DataHubUploadResult.uploaded:
           sent++;
         case DataHubUploadResult.notConfigured:
-          return 'ส่งสำเร็จ $sent รายการ กรุณาตั้งค่า Data Hub แล้วลองอีกครั้ง';
+          return context.tr(
+            'ส่งสำเร็จ $sent รายการ กรุณาตั้งค่า Data Hub แล้วลองอีกครั้ง',
+            'Sent $sent. Set up Data Hub and try again.',
+          );
+        case DataHubUploadResult.rejected:
+          return context.tr(
+            'ส่งสำเร็จ $sent รายการ Data Hub ปฏิเสธรายการถัดไป กรุณาตรวจการตั้งค่า',
+            'Sent $sent. Data Hub rejected the next item. Check settings.',
+          );
         case DataHubUploadResult.failed:
-          return 'ส่งสำเร็จ $sent รายการ รายการที่เหลือยังค้างส่ง ลองอีกครั้งเมื่อเชื่อมต่อ Data Hub';
+          if (generation == _autoUploadGeneration) {
+            _scheduleAutoUpload(_uploadRetryDelay);
+          }
+          return context.tr(
+            'ส่งสำเร็จ $sent รายการ รายการที่เหลือยังค้างส่ง ลองอีกครั้งเมื่อเชื่อมต่อ Data Hub',
+            'Sent $sent. Retry the remaining items when Data Hub is available.',
+          );
         case DataHubUploadResult.statusNotSaved:
-          return 'Data Hub รับรายการล่าสุดแล้ว แต่บันทึกสถานะลงเครื่องไม่สำเร็จ';
+          return context.tr(
+            'Data Hub รับรายการล่าสุดแล้ว แต่บันทึกสถานะลงเครื่องไม่สำเร็จ',
+            'Data Hub received the last item, but the sync status could not be saved.',
+          );
       }
     }
-    return 'ส่งข้อมูลไปยัง Data Hub แล้ว $sent รายการ';
+    return context.tr(
+      'ส่งข้อมูลไปยัง Data Hub แล้ว $sent รายการ',
+      'Sent $sent items to Data Hub',
+    );
   }
 
   Future<void> _openDataHubSettings() async {
@@ -353,35 +564,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('โหลดการตั้งค่า Data Hub ไม่สำเร็จ')),
+          SnackBar(
+            content: Text(
+              context.tr(
+                'โหลดการตั้งค่า Data Hub ไม่สำเร็จ',
+                'Could not load Data Hub settings',
+              ),
+            ),
+          ),
         );
       }
       return;
     }
     if (!mounted) return;
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => DataHubSettingsDialog(
         service: _homeAssistantService,
         settings: settings,
       ),
     );
+    if (mounted && saved == true) _resetAutoUpload();
   }
 
   // ---------- Read flow ----------
+  Future<void> _submitSettingsName() async {
+    _measurementNameMenu.close();
+    _measurementNameFocusNode.unfocus();
+    _measurementNameController.clear();
+    setState(() => _measurementNameError = null);
+    await _openDataHubSettings();
+  }
+
   Future<void> _triggerRead() async {
     if (_isMeasuring) return;
     final name = normalizedMeasurementName(_measurementNameController.text);
-    if (name == null) {
-      setState(() => _measurementNameError = 'กรุณาระบุชื่อการวัด');
+    if (name == dataHubSettingsCommand) {
+      await _submitSettingsName();
       return;
     }
     if (_usbStatus != UsbConnectionStatus.ready) {
-      if (_usbStatus == UsbConnectionStatus.connectionFailed ||
-          _usbStatus == UsbConnectionStatus.permissionDenied ||
-          _usbStatus == UsbConnectionStatus.disconnected) {
-        await _usbService.retry();
-      }
+      _measurementNameMenu.close();
+      _measurementNameFocusNode.unfocus();
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          content: Text(
+            context.tr(
+              'ยังไม่ได้เชื่อมต่อเซนเซอร์',
+              'The sensor is not connected',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.tr('ตกลง', 'OK')),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (name == null) {
+      setState(
+        () => _measurementNameError = context.tr(
+          'กรุณาระบุชื่อการวัด',
+          'Enter a measurement name',
+        ),
+      );
       return;
     }
 
@@ -392,6 +643,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _isMeasuring = true;
       _countdownSeconds = 10;
     });
+    _measurementNameMenu.close();
+    _measurementNameFocusNode.unfocus();
+    unawaited(_rememberMeasurementName(name));
 
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -407,8 +661,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
 
     _measurementEngine.start(
-      onTimeout: () =>
-          _stopMeasurement('หมดเวลาการตรวจวัดก่อนได้รับค่าครบ 10 ค่า'),
+      onTimeout: () => _stopMeasurement(
+        context.tr(
+          'หมดเวลาการตรวจวัดก่อนได้รับค่าครบ 10 ค่า',
+          'Measurement timed out before receiving 10 readings',
+        ),
+      ),
     );
     await _requestNextSample();
   }
@@ -436,24 +694,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
             builder: (_, records, _) => LocalHistorySheet(
               records: records,
               scrollController: scrollController,
+              autoUploadMode: _autoUploadMode,
+              hasInternet: _hasInternet,
+              onAutoUploadChanged: _setAutoUpload,
               onRetryPending: _retryPendingUploads,
               onClear: () async {
                 if (_pendingRetry != null) return;
                 final confirmed = await showDialog<bool>(
                   context: ctx,
                   builder: (dialogContext) => AlertDialog(
-                    title: const Text('Clear all history?'),
-                    content: const Text(
-                      'This deletes saved records on this device only.',
+                    title: Text(
+                      context.tr(
+                        'ล้างประวัติทั้งหมดหรือไม่',
+                        'Clear all history?',
+                      ),
+                    ),
+                    content: Text(
+                      context.tr(
+                        'ระบบจะลบบันทึกที่เก็บไว้ในเครื่องนี้',
+                        'This deletes saved records on this device only.',
+                      ),
                     ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(dialogContext, false),
-                        child: const Text('Cancel'),
+                        child: Text(context.tr('ยกเลิก', 'Cancel')),
                       ),
                       FilledButton(
                         onPressed: () => Navigator.pop(dialogContext, true),
-                        child: const Text('Delete'),
+                        child: Text(context.tr('ลบ', 'Delete')),
                       ),
                     ],
                   ),
@@ -512,7 +781,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Expanded(
             child: Text(
               'GPS: ${_currentGpsLocation!.latitude.toStringAsFixed(5)}, ${_currentGpsLocation!.longitude.toStringAsFixed(5)} (+-${_currentGpsLocation!.accuracy.toStringAsFixed(0)}m)',
-              style: const TextStyle(
+              style: AppFonts.manrope.copyWith(
                 fontSize: 10,
                 color: AppColors.statusDarkText,
               ),
@@ -534,11 +803,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ---------- Map widget (one marker per measurement name) ----------
-  Widget _buildMap() {
+  Widget _buildMap() => ListenableBuilder(
+    listenable: MapPinVisibility.instance,
+    builder: (context, _) => _buildMapContent(),
+  );
+
+  Widget _buildMapContent() {
     final center = (_currentGpsLocation != null)
         ? LatLng(_currentGpsLocation!.latitude, _currentGpsLocation!.longitude)
         : const LatLng(13.75, 100.52); // Bangkok default
-    final groups = measurementMarkerGroups(_localLogs);
+    final groups = measurementMarkerGroups(
+      _localLogs,
+      hiddenMeasurementIds: MapPinVisibility.instance.value,
+    );
     final markerPoints = measurementGroupMarkerPoints(groups);
     final savedMarkers = groups.map((group) {
       return Marker(
@@ -592,29 +869,125 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Action buttons ----------
   Widget _buildMeasurementNameInput({bool compact = false}) {
-    return TextField(
-      controller: _measurementNameController,
-      enabled: !_isMeasuring,
-      textInputAction: TextInputAction.done,
-      maxLength: 80,
-      onChanged: (_) {
-        if (_measurementNameError != null) {
-          setState(() => _measurementNameError = null);
-        }
-      },
-      decoration: InputDecoration(
-        labelText: 'ชื่อการวัด',
-        hintText: 'เช่น แปลง A / Field A',
-        errorText: _measurementNameError,
-        counterText: '',
-        isDense: compact,
-        prefixIcon: const Icon(Icons.label_outline_rounded),
-        border: const OutlineInputBorder(),
+    return LayoutBuilder(
+      builder: (context, constraints) => MenuAnchor(
+        controller: _measurementNameMenu,
+        style: const MenuStyle(
+          padding: WidgetStatePropertyAll(EdgeInsets.zero),
+          maximumSize: WidgetStatePropertyAll(Size(double.infinity, 208)),
+        ),
+        menuChildren: [
+          for (final name in _measurementNameHistory)
+            TextFieldTapRegion(
+              child: SizedBox(
+                width: constraints.maxWidth,
+                child: ListTile(
+                  dense: true,
+                  title: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: IconButton(
+                    tooltip: context.tr(
+                      'ลบชื่อ $name จากประวัติ',
+                      'Remove $name from name history',
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => _removeMeasurementName(name),
+                  ),
+                  onTap: () {
+                    _measurementNameController.value = TextEditingValue(
+                      text: name,
+                      selection: TextSelection.collapsed(offset: name.length),
+                    );
+                    setState(() => _measurementNameError = null);
+                    _measurementNameMenu.close();
+                    _measurementNameFocusNode.unfocus();
+                  },
+                ),
+              ),
+            ),
+        ],
+        child: TextField(
+          controller: _measurementNameController,
+          focusNode: _measurementNameFocusNode,
+          enabled: !_isMeasuring,
+          textInputAction: TextInputAction.done,
+          maxLength: 80,
+          onTap: () {
+            if (_measurementNameHistory.isNotEmpty &&
+                !_measurementNameMenu.isOpen) {
+              _measurementNameMenu.open();
+            }
+          },
+          onChanged: (_) {
+            _measurementNameMenu.close();
+            setState(() => _measurementNameError = null);
+          },
+          onSubmitted: (_) {
+            _measurementNameMenu.close();
+            if (_isSettingsName) _submitSettingsName();
+          },
+          decoration: InputDecoration(
+            labelText: context.tr('ชื่อการวัด', 'Measurement name'),
+            hintText: context.tr('เช่น แปลง A / Field A', 'e.g. Field A'),
+            errorText: _measurementNameError,
+            counterText: '',
+            isDense: compact,
+            prefixIcon: const Icon(Icons.label_outline_rounded),
+            suffixIcon: _measurementNameHistory.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: context.tr(
+                      'ประวัติชื่อการวัด',
+                      'Measurement name history',
+                    ),
+                    icon: const Icon(Icons.arrow_drop_down),
+                    onPressed: _isMeasuring
+                        ? null
+                        : () {
+                            if (_measurementNameMenu.isOpen) {
+                              _measurementNameMenu.close();
+                            } else {
+                              _measurementNameFocusNode.unfocus();
+                              _measurementNameMenu.open();
+                            }
+                          },
+                  ),
+            border: const OutlineInputBorder(),
+          ),
+        ),
       ),
     );
   }
 
   // ---------- Floating START buttons ----------
+
+  Widget _buildMeasureButtonLabel(bool isReady, {required double iconSize}) {
+    final label = isReady
+        ? context.tr('กดเพื่อวัดค่า', 'Press\nto measure')
+        : context.tr('ยังไม่พร้อม', 'Not Ready');
+    final isThai = AppLanguage.of(context)?.isThai ?? true;
+    final labelStyle = isThai
+        ? const TextStyle(fontWeight: FontWeight.bold)
+        : AppFonts.manropeBold;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.play_arrow_rounded, color: Colors.white, size: iconSize),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: labelStyle.copyWith(
+            fontSize: 11,
+            height: 1.1,
+            color: Colors.white,
+          ),
+        ),
+      ],
+    );
+  }
 
   /// Circular START button for portrait mode
   Widget _buildCircleStartButton() {
@@ -626,21 +999,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : AppColors.disabledStart;
 
     return GestureDetector(
-      onTap: _isMeasuring || !isReady ? null : _triggerRead,
+      onTap: _isMeasuring ? null : _triggerRead,
       child: Container(
         width: _portraitStartDiameter,
         height: _portraitStartDiameter,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: bgColor,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 10,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: bgColor),
         child: Center(
           child: _isMeasuring
               ? Column(
@@ -657,33 +1020,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(height: 2),
                     Text(
                       '$_countdownSeconds',
-                      style: const TextStyle(
+                      style: AppFonts.manropeBold.copyWith(
                         fontSize: 14,
-                        fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
                     ),
                   ],
                 )
-              : const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 30,
-                    ),
-                    Text(
-                      'START',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ],
-                ),
+              : _buildMeasureButtonLabel(isReady, iconSize: 30),
         ),
       ),
     );
@@ -699,21 +1043,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         : AppColors.disabledStart;
 
     return GestureDetector(
-      onTap: _isMeasuring || !isReady ? null : _triggerRead,
+      onTap: _isMeasuring ? null : _triggerRead,
       child: Container(
         width: 132,
         height: 64,
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(66)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 10,
-              spreadRadius: 1,
-              offset: const Offset(0, -2),
-            ),
-          ],
         ),
         child: Align(
           alignment: Alignment.center,
@@ -734,34 +1070,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(width: 8),
                       Text(
                         '$_countdownSeconds',
-                        style: const TextStyle(
+                        style: AppFonts.manropeBold.copyWith(
                           fontSize: 20,
-                          fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
                       ),
                     ],
                   )
-                : const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                      SizedBox(width: 4),
-                      Text(
-                        'START',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
+                : _buildMeasureButtonLabel(isReady, iconSize: 22),
           ),
         ),
       ),
@@ -785,7 +1101,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       childAspectRatio: aspectRatio,
       children: [
         SensorCard(
-          title: 'ความชื้น',
+          title: context.tr('ความชื้น', 'Moisture'),
+          abbreviation: 'M',
           value: _currentData.moisture.toStringAsFixed(1),
           unit: '%',
           icon: Icons.water_drop_rounded,
@@ -793,7 +1110,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'อุณหภูมิ',
+          title: context.tr('อุณหภูมิ', 'Temperature'),
+          abbreviation: 'T',
           value: _currentData.temperature.toStringAsFixed(2),
           unit: '°C',
           icon: Icons.thermostat_rounded,
@@ -801,7 +1119,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'pH',
+          title: context.tr('ค่าความเป็นกรด/ด่าง', 'Acidity/alkalinity'),
+          abbreviation: 'pH',
           value: _currentData.ph.toStringAsFixed(2),
           unit: '',
           icon: Icons.science_rounded,
@@ -809,7 +1128,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'EC',
+          title: context.tr('ค่าการนำไฟฟ้า', 'Electrical conductivity'),
+          abbreviation: 'EC',
           value: '${_currentData.ec}',
           unit: 'µS/cm',
           icon: Icons.bolt_rounded,
@@ -817,7 +1137,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'ไนโตรเจน',
+          title: context.tr('ไนโตรเจน', 'Nitrogen'),
+          abbreviation: 'N',
           value: '${_currentData.nitrogen}',
           unit: 'mg/kg',
           icon: Icons.grass_rounded,
@@ -829,7 +1150,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'ฟอสฟอรัส',
+          title: context.tr('ฟอสฟอรัส', 'Phosphorus'),
+          abbreviation: 'P',
           value: '${_currentData.phosphorus}',
           unit: 'mg/kg',
           icon: Icons.grain_rounded,
@@ -841,7 +1163,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'โพแทสเซียม',
+          title: context.tr('โพแทสเซียม', 'Potassium'),
+          abbreviation: 'K',
           value: '${_currentData.potassium}',
           unit: 'mg/kg',
           icon: Icons.spa_rounded,
@@ -851,7 +1174,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           valueFontSize: isPortrait ? 38 : 34,
         ),
         SensorCard(
-          title: 'ความเค็ม',
+          title: context.tr('ความเค็ม', 'Salinity'),
+          abbreviation: 'SAL',
           value: '${_currentData.salinity}',
           unit: 'mg/L',
           icon: Icons.waves_rounded,
@@ -869,7 +1193,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final size = MediaQuery.of(context).size;
     final isPortrait = size.height > size.width;
 
-    return Scaffold(
+    final language = AppLanguage.of(context);
+    final dashboard = Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         titleSpacing: 8,
@@ -894,16 +1219,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
-                children: const [
+                children: [
                   Text(
                     AppConstants.appTitle,
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: AppFonts.manropeBold.copyWith(fontSize: 14),
                   ),
                   Text(
                     AppConstants.appSubtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: Colors.white70),
+                    style: AppFonts.manrope.copyWith(
+                      fontSize: 10,
+                      color: Colors.white70,
+                    ),
                   ),
                 ],
               ),
@@ -911,15 +1239,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'ตั้งค่า Data Hub',
-            onPressed: _openDataHubSettings,
-          ),
+          if (language != null)
+            IconButton(
+              tooltip: context.tr('เปลี่ยนเป็นภาษาอังกฤษ', 'Switch to Thai'),
+              onPressed: () => language.onToggle(context),
+              icon: Text(
+                language.isThai ? 'TH' : 'EN',
+                style: AppFonts.manropeBold.copyWith(
+                  color: Colors.white,
+                  fontSize: 15,
+                ),
+              ),
+            ),
           // Export Raw Log icon on AppBar (Requirement 9)
           IconButton(
             icon: const Icon(Icons.file_download_outlined),
-            tooltip: 'ส่งออกข้อมูลดิบ (Export Raw Log)',
+            tooltip: context.tr('ส่งออกข้อมูลดิบ', 'Export raw log'),
             onPressed: _openExportView,
           ),
           // Local Log icon on AppBar
@@ -928,7 +1263,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.history_rounded),
-                tooltip: 'Local Logs',
+                tooltip: context.tr('บันทึกในเครื่อง', 'Local Logs'),
                 onPressed: _openLocalLogsView,
               ),
               if (_localLogs.length > _seenLogCount)
@@ -947,10 +1282,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         (_localLogs.length - _seenLogCount) > 99
                             ? '99+'
                             : '${_localLogs.length - _seenLogCount}',
-                        style: const TextStyle(
+                        style: AppFonts.manropeBold.copyWith(
                           fontSize: 8,
                           color: Colors.white,
-                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
@@ -963,6 +1297,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: SafeArea(
         maintainBottomViewPadding: true,
         child: isPortrait ? _buildPortrait(size) : _buildLandscape(size),
+      ),
+    );
+    return PopScope(
+      canPop: !_isMeasuring,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          dashboard,
+          if (_isMeasuring) ...[
+            const ModalBarrier(dismissible: false, color: Colors.black38),
+            Center(
+              child: AlertDialog(
+                content: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox.square(
+                      dimension: 26,
+                      child: CircularProgressIndicator(strokeWidth: 3),
+                    ),
+                    const SizedBox(width: 16),
+                    Flexible(
+                      child: Text(
+                        context.tr(
+                          'เซนเซอร์กำลังทำงาน กรุณารอ',
+                          'Sensor is measuring. Please wait.',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

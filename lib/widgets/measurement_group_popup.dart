@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/soil_measurement.dart';
+import '../services/map_pin_visibility.dart';
+import '../utils/app_fonts.dart';
+import '../utils/app_language.dart';
 import '../utils/measurement_map_utils.dart';
 
 class MeasurementGroupMarkerLabel extends StatelessWidget {
@@ -120,6 +123,54 @@ class _MeasurementGroupPopup extends StatefulWidget {
 
 class _MeasurementGroupPopupState extends State<_MeasurementGroupPopup> {
   SoilMeasurement? _selected;
+  bool _removing = false;
+  String? _removeError;
+
+  Future<void> _removePin() async {
+    setState(() {
+      _removing = true;
+      _removeError = null;
+    });
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.tr('ลบหมุดนี้หรือไม่', 'Remove this map pin?')),
+        content: Text(
+          context.tr(
+            'ผลวัดของ ${widget.group.name} จะยังอยู่ใน Local Log',
+            'Measurements for ${widget.group.name} will remain in Local Logs.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(context.tr('ยกเลิก', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(context.tr('ลบหมุด', 'Remove pin')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (confirmed != true) {
+      setState(() => _removing = false);
+      return;
+    }
+    final removed = await MapPinVisibility.instance.hide(
+      widget.group.measurements.map((record) => record.id),
+    );
+    if (!mounted) return;
+    if (removed) {
+      widget.onDismiss();
+      return;
+    }
+    setState(() {
+      _removing = false;
+      _removeError = context.tr('ลบหมุดไม่สำเร็จ', 'Could not remove the pin');
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Material(
@@ -145,25 +196,44 @@ class _MeasurementGroupPopupState extends State<_MeasurementGroupPopup> {
                 ),
                 if (_selected != null)
                   IconButton(
-                    tooltip: 'Back to measurement times',
+                    tooltip: context.tr(
+                      'กลับไปรายการเวลาที่วัด',
+                      'Back to measurement times',
+                    ),
                     icon: const Icon(Icons.arrow_back),
                     onPressed: () => setState(() => _selected = null),
                   ),
                 IconButton(
-                  tooltip: 'Close',
+                  tooltip: context.tr('ลบหมุด', 'Remove pin'),
+                  icon: const Icon(Icons.delete_outline),
+                  color: Theme.of(context).colorScheme.error,
+                  onPressed: _removing ? null : _removePin,
+                ),
+                IconButton(
+                  tooltip: context.tr('ปิด', 'Close'),
                   icon: const Icon(Icons.close),
-                  onPressed: widget.onDismiss,
+                  onPressed: _removing ? null : widget.onDismiss,
                 ),
               ],
             ),
+            if (_removeError case final message?)
+              Text(
+                message,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             if (_selected == null)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(bottom: 4),
-                      child: Text('เลือกวันที่และเวลาที่วัด'),
+                      child: Text(
+                        context.tr(
+                          'เลือกวันที่และเวลาที่วัด',
+                          'Select a measurement time',
+                        ),
+                      ),
                     ),
                     Expanded(
                       child: ListView.builder(
@@ -174,7 +244,10 @@ class _MeasurementGroupPopupState extends State<_MeasurementGroupPopup> {
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             leading: const Icon(Icons.schedule_rounded),
-                            title: Text(_timestamp(record.timestamp)),
+                            title: Text(
+                              _timestamp(record.timestamp),
+                              style: AppFonts.manrope,
+                            ),
                             onTap: () => setState(() => _selected = record),
                           );
                         },
@@ -208,17 +281,38 @@ class _MeasurementDetails extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       Text(
-        'บันทึกเมื่อ: ${_timestamp(measurement.timestamp)}',
+        context.tr(
+          'บันทึกเมื่อ: ${_timestamp(measurement.timestamp)}',
+          'Recorded: ${_timestamp(measurement.timestamp)}',
+        ),
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
       const SizedBox(height: 4),
-      _row('อุณหภูมิ', '${measurement.temperature.toStringAsFixed(2)} °C'),
-      _row('ความชื้น', '${measurement.moisture.toStringAsFixed(1)} %'),
+      _row(
+        context.tr('อุณหภูมิ', 'Temperature'),
+        '${measurement.temperature.toStringAsFixed(2)} °C',
+      ),
+      _row(
+        context.tr('ความชื้น', 'Moisture'),
+        '${measurement.moisture.toStringAsFixed(1)} %',
+      ),
       _row('EC', '${measurement.ec.toStringAsFixed(0)} µS/cm'),
-      _row('ความเค็ม', '${measurement.salinity.toStringAsFixed(0)} mg/L'),
-      _row('ไนโตรเจน', '${measurement.nitrogen.toStringAsFixed(0)} mg/kg'),
-      _row('ฟอสฟอรัส', '${measurement.phosphorus.toStringAsFixed(0)} mg/kg'),
-      _row('โพแทสเซียม', '${measurement.potassium.toStringAsFixed(0)} mg/kg'),
+      _row(
+        context.tr('ความเค็ม', 'Salinity'),
+        '${measurement.salinity.toStringAsFixed(0)} mg/L',
+      ),
+      _row(
+        context.tr('ไนโตรเจน', 'Nitrogen'),
+        '${measurement.nitrogen.toStringAsFixed(0)} mg/kg',
+      ),
+      _row(
+        context.tr('ฟอสฟอรัส', 'Phosphorus'),
+        '${measurement.phosphorus.toStringAsFixed(0)} mg/kg',
+      ),
+      _row(
+        context.tr('โพแทสเซียม', 'Potassium'),
+        '${measurement.potassium.toStringAsFixed(0)} mg/kg',
+      ),
       _row('pH', measurement.ph.toStringAsFixed(2)),
     ],
   );
@@ -227,7 +321,7 @@ class _MeasurementDetails extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label)),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+        Text(value, style: AppFonts.manropeSemiBold),
       ],
     ),
   );

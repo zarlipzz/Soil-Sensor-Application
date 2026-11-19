@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../utils/app_fonts.dart';
+
 enum CornerCutout { none, topLeft, topRight, bottomLeft, bottomRight }
 
 class CornerCutoutClipper extends CustomClipper<Path> {
@@ -49,6 +51,7 @@ class CornerCutoutClipper extends CustomClipper<Path> {
 /// Reusable metric card widget for displaying individual soil sensor parameters.
 class SensorCard extends StatelessWidget {
   final String title;
+  final String? abbreviation;
   final String value;
   final String? unit;
   final IconData icon;
@@ -62,6 +65,7 @@ class SensorCard extends StatelessWidget {
   const SensorCard({
     super.key,
     required this.title,
+    this.abbreviation,
     required this.value,
     this.unit,
     required this.icon,
@@ -88,6 +92,22 @@ class SensorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final shortTitle = abbreviation;
+    const titleStyle = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF475569),
+    );
+    final titleLabel = Text(
+      shortTitle == null ? title : '($shortTitle) $title',
+      style: titleStyle,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+    );
+    final titleIcon = Icon(icon, color: color, size: 16);
     // Leave a small gap between content and the inward curve.
     final cutoutInset = cutoutRadius - 12;
     final cardWidget = Card(
@@ -95,35 +115,40 @@ class SensorCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Stack(
           fit: StackFit.expand,
+          clipBehavior: Clip.none,
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 22),
-                      child: Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF475569),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
+                if (isLandscape)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (shortTitle != null)
+                        Text('($shortTitle)', style: titleStyle),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(title, style: titleStyle, maxLines: 1),
                       ),
-                    ),
-                    Positioned(
-                      right: cornerCutout == CornerCutout.topRight
-                          ? cutoutInset
-                          : 0,
-                      child: Icon(icon, color: color, size: 16),
-                    ),
-                  ],
-                ),
+                    ],
+                  )
+                else
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 22),
+                        child: titleLabel,
+                      ),
+                      Positioned(
+                        right: cornerCutout == CornerCutout.topRight
+                            ? cutoutInset
+                            : 0,
+                        child: titleIcon,
+                      ),
+                    ],
+                  ),
                 // Enlarged value centered both vertically and horizontally
                 Expanded(
                   child: Center(
@@ -131,9 +156,8 @@ class SensorCard extends StatelessWidget {
                       fit: BoxFit.scaleDown,
                       child: Text(
                         _displayValue,
-                        style: TextStyle(
+                        style: AppFonts.manropeBold.copyWith(
                           fontSize: valueFontSize,
-                          fontWeight: FontWeight.bold,
                           color: color,
                         ),
                       ),
@@ -142,6 +166,12 @@ class SensorCard extends StatelessWidget {
                 ),
               ],
             ),
+            if (isLandscape)
+              Positioned(
+                top: -3,
+                right: -4,
+                child: Icon(icon, color: color, size: 13),
+              ),
             Positioned(
               right: unitOnRight
                   ? (cornerCutout == CornerCutout.bottomRight ? cutoutInset : 0)
@@ -153,9 +183,8 @@ class SensorCard extends StatelessWidget {
               child: Text(
                 _displayUnit,
                 key: Key('sensor-unit-$title'),
-                style: const TextStyle(
+                style: AppFonts.manropeSemiBold.copyWith(
                   fontSize: 10,
-                  fontWeight: FontWeight.w600,
                   color: Color(0xFF64748B),
                 ),
                 textAlign: unitOnRight ? TextAlign.right : TextAlign.left,

@@ -7,7 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/soil_measurement.dart';
 
 class DataHubSettings {
-  const DataHubSettings({required this.url, required this.apiKey});
+  const DataHubSettings({
+    required this.url,
+    required this.apiKey,
+    this.autoUpload = false,
+  });
 
   static const defaults = DataHubSettings(
     url: String.fromEnvironment(
@@ -19,6 +23,7 @@ class DataHubSettings {
 
   final String url;
   final String apiKey;
+  final bool autoUpload;
 
   static Uri? parseEndpoint(String value) {
     final uri = Uri.tryParse(value.trim());
@@ -33,7 +38,13 @@ class DataHubSettings {
   }
 }
 
-enum DataHubUploadResult { uploaded, notConfigured, failed, statusNotSaved }
+enum DataHubUploadResult {
+  uploaded,
+  notConfigured,
+  rejected,
+  failed,
+  statusNotSaved,
+}
 
 class HomeAssistantService {
   HomeAssistantService({http.Client? client})
@@ -44,14 +55,36 @@ class HomeAssistantService {
 
   Future<DataHubSettings> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getStringList(_settingsKey);
-    if (stored == null || stored.length != 2) return DataHubSettings.defaults;
-    return DataHubSettings(url: stored[0], apiKey: stored[1]);
+    return _readSettings(prefs);
   }
 
-  Future<bool> saveSettings(DataHubSettings settings) async {
+  DataHubSettings _readSettings(SharedPreferences prefs) {
+    final stored = prefs.getStringList(_settingsKey);
+    if (stored == null || stored.length < 2) return DataHubSettings.defaults;
+    return DataHubSettings(
+      url: stored[0],
+      apiKey: stored[1],
+      autoUpload: stored.length == 3 && stored[2] == 'true',
+    );
+  }
+
+  Future<bool> saveCredentials(DataHubSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.setStringList(_settingsKey, [settings.url, settings.apiKey]);
+    return prefs.setStringList(_settingsKey, [
+      settings.url,
+      settings.apiKey,
+      _readSettings(prefs).autoUpload.toString(),
+    ]);
+  }
+
+  Future<bool> saveAutoUpload(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    final settings = _readSettings(prefs);
+    return prefs.setStringList(_settingsKey, [
+      settings.url,
+      settings.apiKey,
+      enabled.toString(),
+    ]);
   }
 
   Future<DataHubUploadResult> uploadMeasurement(
@@ -71,6 +104,9 @@ class HomeAssistantService {
       }
 
       debugPrint('[Data Hub] Ingest returned HTTP $status.');
+      if (status >= 400 && status < 500 && status != 408 && status != 429) {
+        return DataHubUploadResult.rejected;
+      }
     } catch (_) {
       debugPrint('[Data Hub] Ingest request failed.');
     }
