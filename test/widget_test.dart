@@ -59,20 +59,36 @@ void main() {
     });
     tester.view.devicePixelRatio = 1;
     tester.view.padding = const FakeViewPadding(top: 24, bottom: 12);
+    tester.view.viewPadding = const FakeViewPadding(top: 24, bottom: 12);
 
     for (final size in [const Size(360, 800), const Size(800, 360)]) {
       tester.view.physicalSize = size;
       await tester.pumpWidget(const SoilSensorApp());
       await tester.pumpAndSettle();
 
-      final button = find.byKey(const ValueKey('phone-measure-button'));
+      final portrait = size.height > size.width;
+      final button = find.byKey(
+        ValueKey(portrait ? 'portrait-measure-button' : 'landscape-measure-button'),
+      );
       final buttonRect = tester.getRect(button);
       final cards = find.byType(SensorCard);
       expect(cards, findsNWidgets(8));
+      if (portrait) {
+        expect(buttonRect.size, const Size(120, 58));
+        expect(buttonRect.center.dx, closeTo(size.width / 2, 1));
+        expect(buttonRect.bottom, closeTo(size.height - 12, 1));
+        expect(tester.getRect(cards.last).bottom, lessThan(buttonRect.top));
+      } else {
+        final nameField = tester.getRect(find.byType(TextField));
+        expect(buttonRect.width, 86);
+        expect(buttonRect.left, greaterThan(nameField.right));
+        expect(buttonRect.center.dy, closeTo(nameField.center.dy, 1));
+        expect(buttonRect.bottom, lessThan(tester.getRect(cards.first).top));
+      }
       for (var index = 0; index < 8; index++) {
         final card = cards.at(index);
         final metric = tester.widget<SensorCard>(card);
-        expect(tester.getRect(card).overlaps(buttonRect), isFalse);
+        expect(metric.cornerCutout, CornerCutout.none);
         final titleLabel = size.width > size.height
             ? '(${metric.abbreviation})'
             : '(${metric.abbreviation}) ${metric.title}';
@@ -91,12 +107,65 @@ void main() {
 
     tester.view.physicalSize = const Size(1000, 600);
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('phone-measure-button')), findsNothing);
+    final tabletButton = find.byKey(const ValueKey('landscape-measure-button'));
+    expect(tester.getSize(tabletButton).width, 132);
     expect(
       tester.widgetList<SensorCard>(find.byType(SensorCard)).every(
         (card) => !card.compact,
       ),
       isTrue,
     );
+  });
+
+  testWidgets('not ready can rescan USB and request permission again', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const usb = MethodChannel('usb_serial');
+    const usbEvents = MethodChannel('usb_serial/usb_events');
+    const gps = MethodChannel('flutter.baseflow.com/geolocator');
+    const network = MethodChannel('com.soil.sensor.soil_app/network');
+    var visible = false;
+    var attempts = 0;
+    messenger.setMockMethodCallHandler(usb, (call) async {
+      if (call.method == 'listDevices') {
+        return [
+          if (visible)
+            {'deviceName': 'CH340', 'vid': 0x1a86, 'pid': 0x7523, 'deviceId': 1},
+        ];
+      }
+      if (call.method == 'create') {
+        attempts++;
+        throw PlatformException(code: 'usb', message: 'USB permission denied');
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(usbEvents, (_) async => null);
+    messenger.setMockMethodCallHandler(network, (_) async => null);
+    messenger.setMockMethodCallHandler(gps, (_) async => false);
+    addTearDown(() {
+      for (final channel in [usb, usbEvents, network, gps]) {
+        messenger.setMockMethodCallHandler(channel, null);
+      }
+    });
+
+    await tester.pumpWidget(const SoilSensorApp());
+    await tester.pumpAndSettle();
+    final button = find.byKey(const ValueKey('landscape-measure-button'));
+    final retry = find.text('ลองเชื่อมต่อใหม่');
+    expect(attempts, 0);
+    visible = true;
+    for (var count = 1; count <= 2; count++) {
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      if (count == 2) {
+        expect(find.textContaining('กรุณาอนุญาตให้แอป'), findsOneWidget);
+      }
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+      expect(attempts, count);
+    }
   });
 }

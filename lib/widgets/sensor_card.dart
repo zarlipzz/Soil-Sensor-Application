@@ -96,7 +96,7 @@ class SensorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
-    if (compact) return _buildCompactCard(isLandscape);
+    if (compact) return _clipCard(_buildCompactCard(isLandscape));
     final shortTitle = abbreviation;
     const titleStyle = TextStyle(
       fontSize: 12,
@@ -154,17 +154,12 @@ class SensorCard extends StatelessWidget {
                   ),
                 // Enlarged value centered both vertically and horizontally
                 Expanded(
-                  child: Center(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        _displayValue,
-                        style: AppFonts.manropeBold.copyWith(
-                          fontSize: valueFontSize,
-                          color: color,
-                        ),
-                      ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _valueCornerInset,
+                      vertical: _displayUnit.isEmpty ? 0 : 10,
                     ),
+                    child: _buildValue(),
                   ),
                 ),
               ],
@@ -198,15 +193,34 @@ class SensorCard extends StatelessWidget {
       ),
     );
 
-    if (cornerCutout == CornerCutout.none) {
-      return cardWidget;
-    }
-
-    return ClipPath(
-      clipper: CornerCutoutClipper(corner: cornerCutout, radius: cutoutRadius),
-      child: cardWidget,
-    );
+    return _clipCard(cardWidget);
   }
+
+  Widget _clipCard(Widget card) => cornerCutout == CornerCutout.none
+      ? card
+      : ClipPath(
+          clipper: CornerCutoutClipper(corner: cornerCutout, radius: cutoutRadius),
+          child: card,
+        );
+
+  double get _valueCornerInset =>
+      cornerCutout == CornerCutout.none ? 0 : cutoutRadius * 0.6;
+
+  Widget _buildValue() => Center(
+    child: FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        _displayValue,
+        maxLines: 1,
+        softWrap: false,
+        style: AppFonts.manropeBold.copyWith(
+          color: color,
+          fontSize: valueFontSize,
+          height: compact ? 1.1 : null,
+        ),
+      ),
+    ),
+  );
 
   Widget _buildCompactCard(bool isLandscape) {
     const titleStyle = TextStyle(
@@ -215,8 +229,10 @@ class SensorCard extends StatelessWidget {
       fontWeight: FontWeight.w600,
       color: Color(0xFF475569),
     );
-    final symbol = Icon(icon, color: color, size: 13);
+    final symbol = Icon(icon, color: color, size: isLandscape ? 11 : 13);
     final abbreviationLabel = abbreviation == null ? null : '($abbreviation)';
+    final titleInset = cutoutRadius - 10;
+    final unitInset = cornerCutout == CornerCutout.bottomRight ? titleInset : 0.0;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -244,6 +260,8 @@ class SensorCard extends StatelessWidget {
             ] else
               Row(
                 children: [
+                  if (cornerCutout == CornerCutout.topLeft)
+                    SizedBox(width: titleInset),
                   const SizedBox(width: 17),
                   Expanded(
                     child: Text(
@@ -258,34 +276,30 @@ class SensorCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   symbol,
+                  if (cornerCutout == CornerCutout.topRight)
+                    SizedBox(width: titleInset),
                 ],
               ),
             Expanded(
-              child: Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    _displayValue,
-                    style: AppFonts.manropeBold.copyWith(
-                      color: color,
-                      fontSize: valueFontSize,
-                      height: 1.1,
-                    ),
-                  ),
-                ),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: _valueCornerInset),
+                child: _buildValue(),
               ),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                _displayUnit.isEmpty ? ' ' : _displayUnit,
-                key: Key('sensor-unit-$title'),
-                style: AppFonts.manropeSemiBold.copyWith(
-                  fontSize: 9,
-                  height: 1.1,
-                  color: const Color(0xFF64748B),
+            Padding(
+              padding: EdgeInsets.only(right: unitInset),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  _displayUnit.isEmpty ? ' ' : _displayUnit,
+                  key: Key('sensor-unit-$title'),
+                  style: AppFonts.manropeSemiBold.copyWith(
+                    fontSize: 9,
+                    height: 1.1,
+                    color: const Color(0xFF64748B),
+                  ),
+                  maxLines: 1,
                 ),
-                maxLines: 1,
               ),
             ),
           ],

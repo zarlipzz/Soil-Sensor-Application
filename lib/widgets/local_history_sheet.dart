@@ -248,7 +248,8 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
     final distinctNames = _distinctNames;
     final distinctDates = _availableDates.toList()
       ..sort((a, b) => b.compareTo(a));
-    final hasSelection = widget.records.isNotEmpty &&
+    final hasSelection =
+        widget.records.isNotEmpty &&
         (_selectAll || _selectedNames.isNotEmpty || _selectedDates.isNotEmpty);
     final pendingCount = widget.records
         .where((record) => !record.isSyncedToCloud)
@@ -259,7 +260,7 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
         )
         .length;
 
-    return Column(
+    final controls = Column(
       children: [
         const SizedBox(height: 12),
         Container(
@@ -337,242 +338,246 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
               onChanged: (value) => setState(() => _query = value),
             ),
           ),
-        // Checkbox Filter panel (Requirement 8)
-        if (_showFilterPanel) ...[
-          Expanded(
-            child: ListView(
-              key: const ValueKey('history-filters'),
-              controller: widget.scrollController,
-              children: [
-                Container(
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            context.tr(
-                              'เลือกดูข้อมูล:',
-                              'Filter measurements:',
-                            ),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const Spacer(),
-                          Checkbox(
-                            value: _selectAll,
-                            activeColor: AppColors.softBlue,
-                            onChanged: (val) {
-                              setState(() {
-                                _selectAll = val ?? false;
-                                if (_selectAll) {
-                                  _selectedNames.clear();
-                                  _selectedDates.clear();
-                                }
-                              });
-                            },
-                          ),
-                          Text(
-                            context.tr('ทั้งหมด', 'All'),
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (!_selectAll) ...[
-                        if (distinctNames.isNotEmpty) ...[
-                          const Divider(height: 12),
-                          Text(
-                            context.tr(
-                              'ติ๊กเลือกชื่อการวัด:',
-                              'By measurement name:',
-                            ),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: distinctNames.map((name) {
-                              final checked = _selectedNames.contains(name);
-                              return FilterChip(
-                                label: Text(
-                                  name,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                selected: checked,
-                                selectedColor: AppColors.lightBlueTint,
-                                checkmarkColor: AppColors.softBlue,
-                                onSelected: (val) {
-                                  setState(() {
-                                    if (val) {
-                                      _selectedNames.add(name);
-                                    } else {
-                                      _selectedNames.remove(name);
-                                    }
-                                    _selectedDates.retainAll(_availableDates);
-                                  });
-                                },
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                        if (distinctDates.isNotEmpty) ...[
-                          const Divider(height: 12),
-                          Text(
-                            context.tr('ติ๊กเลือกวันที่:', 'By date:'),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: distinctDates.map((date) {
-                              final checked = _selectedDates.contains(date);
-                              return FilterChip(
-                                label: Text(
-                                  date,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                selected: checked,
-                                selectedColor: AppColors.lightBlueTint,
-                                checkmarkColor: AppColors.softBlue,
-                                onSelected: (val) {
-                                  setState(() {
-                                    if (val) {
-                                      _selectedDates.add(date);
-                                    } else {
-                                      _selectedDates.remove(date);
-                                    }
-                                  });
-                                },
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      ],
+    );
+    final filters = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                context.tr('เลือกดูข้อมูล:', 'Filter measurements:'),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const Spacer(),
+              Checkbox(
+                value: _selectAll,
+                activeColor: AppColors.softBlue,
+                onChanged: (val) {
+                  setState(() {
+                    _selectAll = val ?? false;
+                    if (_selectAll) {
+                      _selectedNames.clear();
+                      _selectedDates.clear();
+                    }
+                  });
+                },
+              ),
+              Text(
+                context.tr('ทั้งหมด', 'All'),
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: hasSelection
-                    ? () => _toggleFilterPanel(confirm: true)
-                    : null,
-                icon: const Icon(Icons.check_rounded),
-                label: Text(context.tr('ยืนยัน', 'Confirm')),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.softBlue,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey.shade300,
-                  disabledForegroundColor: Colors.grey.shade700,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+          if (!_selectAll) ...[
+            if (distinctNames.isNotEmpty) ...[
+              const Divider(height: 12),
+              Text(
+                context.tr('ติ๊กเลือกชื่อการวัด:', 'By measurement name:'),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
                 ),
               ),
-            ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: distinctNames.map((name) {
+                  final checked = _selectedNames.contains(name);
+                  return FilterChip(
+                    label: Text(name, style: const TextStyle(fontSize: 12)),
+                    selected: checked,
+                    selectedColor: AppColors.lightBlueTint,
+                    checkmarkColor: AppColors.softBlue,
+                    onSelected: (val) {
+                      setState(() {
+                        if (val) {
+                          _selectedNames.add(name);
+                        } else {
+                          _selectedNames.remove(name);
+                        }
+                        _selectedDates.retainAll(_availableDates);
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+            if (distinctDates.isNotEmpty) ...[
+              const Divider(height: 12),
+              Text(
+                context.tr('ติ๊กเลือกวันที่:', 'By date:'),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: distinctDates.map((date) {
+                  final checked = _selectedDates.contains(date);
+                  return FilterChip(
+                    label: Text(date, style: const TextStyle(fontSize: 12)),
+                    selected: checked,
+                    selectedColor: AppColors.lightBlueTint,
+                    checkmarkColor: AppColors.softBlue,
+                    onSelected: (val) {
+                      setState(() {
+                        if (val) {
+                          _selectedDates.add(date);
+                        } else {
+                          _selectedDates.remove(date);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+    final confirmButton = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: hasSelection
+              ? () => _toggleFilterPanel(confirm: true)
+              : null,
+          icon: const Icon(Icons.check_rounded),
+          label: Text(context.tr('ยืนยัน', 'Confirm')),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.softBlue,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: Colors.grey.shade300,
+            disabledForegroundColor: Colors.grey.shade700,
+            padding: const EdgeInsets.symmetric(vertical: 12),
           ),
-        ] else ...[
-          const Divider(height: 1),
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(
-                    child: Text(
-                      widget.records.isEmpty
-                          ? context.tr(
-                              'ยังไม่มีข้อมูลการวัดในเครื่อง',
-                              'No local measurements yet',
-                            )
-                          : context.tr(
-                              'ไม่พบรายการที่ตรงกับตัวกรองที่เลือก',
-                              'No measurements match the selected filters',
-                            ),
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                  )
-                : ListView.builder(
-                    key: const ValueKey('history-results'),
-                    controller: widget.scrollController,
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      final record = filtered[index];
-                      final title = record.measurementName.trim().isEmpty
-                          ? context.tr('การวัดไม่มีชื่อ', 'Unnamed measurement')
-                          : record.measurementName.trim();
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(
-                          Icons.eco_rounded,
-                          color: AppColors.softBlue,
-                          size: 20,
-                        ),
-                        title: Text(
-                          '$title — ${measurementFilterDate(record.timestamp)} ${record.timestamp.hour.toString().padLeft(2, '0')}:${record.timestamp.minute.toString().padLeft(2, '0')}',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(
-                          context.tr(
-                            'ความชื้น ${record.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
-                            'Moisture ${record.moisture.toStringAsFixed(1)}% · Temperature ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+        ),
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pinConfirm = _showFilterPanel && constraints.maxHeight >= 180;
+        return Column(
+          children: [
+            Expanded(
+              child: CustomScrollView(
+                key: ValueKey(
+                  _showFilterPanel ? 'history-filters' : 'history-results',
+                ),
+                controller: widget.scrollController,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                slivers: [
+                  SliverToBoxAdapter(child: controls),
+                  if (_showFilterPanel) ...[
+                    SliverToBoxAdapter(child: filters),
+                    if (!pinConfirm) SliverToBoxAdapter(child: confirmButton),
+                  ] else ...[
+                    const SliverToBoxAdapter(child: Divider(height: 1)),
+                    if (filtered.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: Text(
+                            widget.records.isEmpty
+                                ? context.tr(
+                                    'ยังไม่มีข้อมูลการวัดในเครื่อง',
+                                    'No local measurements yet',
+                                  )
+                                : context.tr(
+                                    'ไม่พบรายการที่ตรงกับตัวกรองที่เลือก',
+                                    'No measurements match the selected filters',
+                                  ),
+                            style: const TextStyle(color: Colors.grey),
                           ),
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              record.isSyncedToCloud
-                                  ? Icons.cloud_done
-                                  : Icons.cloud_off,
-                              color: record.isSyncedToCloud
-                                  ? AppColors.softBlue
-                                  : Colors.grey,
-                              size: 18,
+                      )
+                    else
+                      SliverList.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final record = filtered[index];
+                          final title = record.measurementName.trim().isEmpty
+                              ? context.tr(
+                                  'การวัดไม่มีชื่อ',
+                                  'Unnamed measurement',
+                                )
+                              : record.measurementName.trim();
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.eco_rounded,
+                              color: AppColors.softBlue,
+                              size: 20,
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              record.isSyncedToCloud
-                                  ? context.tr('ส่งแล้ว', 'Sent')
-                                  : context.tr('ค้างส่ง', 'Pending'),
+                            title: Text(
+                              '$title — ${measurementFilterDate(record.timestamp)} ${record.timestamp.hour.toString().padLeft(2, '0')}:${record.timestamp.minute.toString().padLeft(2, '0')}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ],
-                        ),
-                        onTap: () => showDialog<void>(
-                          context: context,
-                          builder: (_) => HistoryRecordDetails(record: record),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ],
+                            subtitle: Text(
+                              context.tr(
+                                'ความชื้น ${record.moisture.toStringAsFixed(1)}% · อุณหภูมิ ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+                                'Moisture ${record.moisture.toStringAsFixed(1)}% · Temperature ${record.temperature.toStringAsFixed(2)} °C · pH ${record.ph.toStringAsFixed(2)}',
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  record.isSyncedToCloud
+                                      ? Icons.cloud_done
+                                      : Icons.cloud_off,
+                                  color: record.isSyncedToCloud
+                                      ? AppColors.softBlue
+                                      : Colors.grey,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  record.isSyncedToCloud
+                                      ? context.tr('ส่งแล้ว', 'Sent')
+                                      : context.tr('ค้างส่ง', 'Pending'),
+                                ),
+                              ],
+                            ),
+                            onTap: () {
+                              FocusScope.of(context).unfocus();
+                              showDialog<void>(
+                                context: context,
+                                builder: (_) => HistoryRecordDetails(record: record),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                  ],
+                ],
+              ),
+            ),
+            if (pinConfirm) confirmButton,
+          ],
+        );
+      },
     );
   }
 }

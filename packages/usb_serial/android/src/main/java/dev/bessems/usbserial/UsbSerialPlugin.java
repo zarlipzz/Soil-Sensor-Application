@@ -1,6 +1,5 @@
 package dev.bessems.usbserial;
 
-import android.annotation.SuppressLint;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -14,7 +13,6 @@ import android.util.Log;
 
 import com.felhr.usbserial.UsbSerialDevice;
 
-import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
 import java.util.ArrayList;
@@ -42,7 +40,7 @@ public class UsbSerialPlugin implements FlutterPlugin, MethodCallHandler, EventC
     private BinaryMessenger m_Messenger;
     private EventChannel.EventSink m_EventSink;
 
-    private static final String ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION";
+    private static final String ACTION_USB_PERMISSION = "dev.bessems.usbserial.USB_PERMISSION";
     public static final String ACTION_USB_ATTACHED = "android.hardware.usb.action.USB_DEVICE_ATTACHED";
     public static final String ACTION_USB_DETACHED = "android.hardware.usb.action.USB_DEVICE_DETACHED";
 
@@ -107,7 +105,6 @@ public class UsbSerialPlugin implements FlutterPlugin, MethodCallHandler, EventC
         void onSuccess(UsbDevice device);
         void onFailed(UsbDevice device);
     }
-    @SuppressLint("PrivateApi")
     private void acquirePermissions(UsbDevice device, AcquirePermissionCallback cb) {
 
         class BRC2 extends  BroadcastReceiver {
@@ -151,19 +148,9 @@ public class UsbSerialPlugin implements FlutterPlugin, MethodCallHandler, EventC
             flags = PendingIntent.FLAG_MUTABLE;
         }
 
-        Intent intent = new Intent(ACTION_USB_PERMISSION);
-
-        Class<?> activityThread = null;
-        try {
-            activityThread = Class.forName("android.app.ActivityThread");
-            Method method = activityThread.getDeclaredMethod("currentPackageName");
-            String appPackageName = (String) method.invoke(activityThread);
-            intent.setPackage(appPackageName);
-        } catch (Exception e) {
-            // Not too important to throw anything
-        }
-
-        PendingIntent permissionIntent = PendingIntent.getBroadcast(cw, 0, intent, flags);
+        Intent intent = new Intent(ACTION_USB_PERMISSION).setPackage(cw.getPackageName());
+        PendingIntent permissionIntent =
+                PendingIntent.getBroadcast(cw, device.getDeviceId(), intent, flags);
 
         IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
 
@@ -173,7 +160,13 @@ public class UsbSerialPlugin implements FlutterPlugin, MethodCallHandler, EventC
             cw.registerReceiver(usbReceiver, filter);
         }
 
-        m_Manager.requestPermission(device, permissionIntent);
+        try {
+            m_Manager.requestPermission(device, permissionIntent);
+        } catch (RuntimeException e) {
+            cw.unregisterReceiver(usbReceiver);
+            Log.w(TAG, "USB permission request failed", e);
+            cb.onFailed(device);
+        }
     }
 
     private void openDevice(String type, UsbDevice device, int iface, Result result, boolean allowAcquirePermission) {
@@ -192,10 +185,13 @@ public class UsbSerialPlugin implements FlutterPlugin, MethodCallHandler, EventC
         };
 
         try {
-            UsbDeviceConnection connection = m_Manager.openDevice(device);
-
-            if ( connection == null && allowAcquirePermission ) {
+            if (allowAcquirePermission && !m_Manager.hasPermission(device)) {
                 acquirePermissions(device, cb);
+                return;
+            }
+            UsbDeviceConnection connection = m_Manager.openDevice(device);
+            if (connection == null) {
+                result.error(TAG, "Could not open USB serial device.", null);
                 return;
             }
 

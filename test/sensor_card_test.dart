@@ -27,4 +27,43 @@ void main() {
     expect(unit.bottom, closeTo(card.bottom - 12, 1));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('long numbers scale down without dropping digits or covering units', (
+    tester,
+  ) async {
+    const longValue = '1234567890.12345';
+    Future<Rect> renderValue(String value) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 92,
+              height: 80,
+              child: SensorCard(
+                title: 'Conductivity',
+                abbreviation: 'EC',
+                value: value,
+                unit: 'µS/cm',
+                icon: Icons.bolt,
+                color: Colors.blue,
+                valueFontSize: 24,
+                compact: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      return tester.getRect(find.text(value));
+    }
+
+    final short = await renderValue('12.3');
+    final long = await renderValue(longValue);
+    final card = tester.getRect(find.byType(Card));
+    final unit = tester.getRect(find.text('µS/cm'));
+    expect(long.height, lessThan(short.height));
+    expect(long.left, greaterThan(card.left));
+    expect(long.right, lessThan(card.right));
+    expect(long.bottom, lessThanOrEqualTo(unit.top));
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -18,6 +18,24 @@ SoilMeasurement record(String name, int day) => SoilMeasurement(
 );
 
 void main() {
+  testWidgets('export controls can scroll in a short viewport', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 108,
+            child: ExportDialog(records: [record('แปลง A', 1)]),
+          ),
+        ),
+      ),
+    );
+    final button = find.text('ส่งออก 1 รายการ (csv)');
+    await tester.ensureVisible(button);
+    await tester.pumpAndSettle();
+    expect(button.hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('export shows dates for the selected measurements', (
     tester,
   ) async {

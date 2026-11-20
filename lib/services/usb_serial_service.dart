@@ -79,6 +79,8 @@ class UsbSerialService {
     // permission session, so a previously denied ID must not block it.
     if (event.event == UsbEvent.ACTION_USB_ATTACHED) {
       _permissionDeniedDeviceId = null;
+      final pendingCheck = _connectionCheck;
+      if (pendingCheck != null) await pendingCheck;
     }
     await checkConnection();
   }

@@ -124,4 +124,44 @@ void main() {
     expect(find.textContaining('แปลง A —'), findsNWidgets(2));
     expect(find.textContaining('แปลง B —'), findsNothing);
   });
+
+  testWidgets('landscape Log can shrink and stays usable with the keyboard', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(802, 360);
+    tester.view.padding = const FakeViewPadding(top: 24);
+    tester.view.viewPadding = const FakeViewPadding(top: 24);
+    addTearDown(tester.view.reset);
+
+    await openDashboard(tester);
+    await tester.tap(find.byTooltip('บันทึกในเครื่อง'));
+    await tester.pumpAndSettle();
+    final results = find.byKey(const ValueKey('history-results'));
+    final originalHeight = tester.getSize(results).height;
+    final drag = await tester.startGesture(tester.getCenter(results));
+    await drag.moveBy(const Offset(0, 25));
+    await tester.pump(const Duration(milliseconds: 40));
+    await drag.moveBy(const Offset(0, 85));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(tester.getSize(results).height, lessThan(originalHeight));
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    final search = find.descendant(of: results, matching: find.byType(TextField));
+    await tester.ensureVisible(search);
+    await tester.enterText(search, 'แปลง A');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 235);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    tester.testTextInput.hide();
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+    final record = find.textContaining('แปลง A —').first;
+    await tester.ensureVisible(record);
+    expect(record.hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

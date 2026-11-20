@@ -42,6 +42,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _portraitStartDiameter = 88.0;
+  static const _phonePortraitStartRadius = 60.0;
   static const _sensorGridSpacing = 6.0;
   static const _uploadDelay = Duration(seconds: 7);
   static const _uploadRetryDelay = Duration(seconds: 30);
@@ -50,6 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ----- Service instances -----
   final LocalStorageService _storageService = LocalStorageService();
   final UsbSerialService _usbService = UsbSerialService();
+  AppLifecycleListener? _usbLifecycle;
   final GpsService _gpsService = GpsService();
   late final _homeAssistantService =
       widget.dataHubService ?? HomeAssistantService();
@@ -145,6 +147,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     // Initialise USB detection and GPS
     _usbService.initialize();
+    _usbLifecycle = AppLifecycleListener(
+      onResume: () => unawaited(_usbService.checkConnection()),
+    );
     _startGpsTracking();
     unawaited(_initAutoUpload());
   }
@@ -278,6 +283,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _networkSubscription?.cancel();
     _measurementEngine.dispose();
     _gpsPositionSubscription?.cancel();
+    _usbLifecycle?.dispose();
     _usbService.dispose();
     if (widget.dataHubService == null) _homeAssistantService.dispose();
     _logs.dispose();
@@ -608,23 +614,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_usbStatus != UsbConnectionStatus.ready) {
       _measurementNameMenu.close();
       _measurementNameFocusNode.unfocus();
-      await showDialog<void>(
+      final retry = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           content: Text(
-            context.tr(
-              'ยังไม่ได้เชื่อมต่อเซนเซอร์',
-              'The sensor is not connected',
-            ),
+            switch (_usbStatus) {
+              UsbConnectionStatus.permissionDenied => context.tr(
+                'กรุณาอนุญาตให้แอปเข้าถึงเซนเซอร์ USB แล้วลองใหม่',
+                'Allow access to the USB sensor and try again.',
+              ),
+              UsbConnectionStatus.connectionFailed => context.tr(
+                'เซนเซอร์ไม่ตอบสนอง กรุณาตรวจสายแล้วลองใหม่',
+                'The sensor did not respond. Check the cable and try again.',
+              ),
+              UsbConnectionStatus.requestingPermission => context.tr(
+                'กำลังรอการอนุญาต USB',
+                'Waiting for USB permission.',
+              ),
+              UsbConnectionStatus.connecting ||
+              UsbConnectionStatus.initializing ||
+              UsbConnectionStatus.ready => context.tr(
+                'กำลังเตรียมเซนเซอร์ กรุณารอสักครู่',
+                'Preparing the sensor. Please wait.',
+              ),
+              UsbConnectionStatus.disconnected => context.tr(
+                'ยังไม่ได้เชื่อมต่อเซนเซอร์ ตรวจสายหรือเปิด OTG ในการตั้งค่ามือถือ',
+                'Sensor not detected. Check the OTG adapter or enable OTG in settings.',
+              ),
+            },
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: Text(context.tr('ตกลง', 'OK')),
             ),
+            if (_usbStatus == UsbConnectionStatus.disconnected ||
+                _usbStatus == UsbConnectionStatus.permissionDenied ||
+                _usbStatus == UsbConnectionStatus.connectionFailed)
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(context.tr('ลองเชื่อมต่อใหม่', 'Retry connection')),
+              ),
           ],
         ),
       );
+      if (retry == true && mounted) await _usbService.retry();
       return;
     }
     if (name == null) {
@@ -674,6 +708,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Local Logs Modal ----------
   void _openLocalLogsView() {
+    _measurementNameFocusNode.unfocus();
     setState(() => _seenLogCount = _localLogs.length);
     showModalBottomSheet(
       context: context,
@@ -682,66 +717,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: MediaQuery.orientationOf(ctx) == Orientation.landscape
-            ? 0.84
-            : 0.65,
-        maxChildSize: 0.92,
-        builder: (_, scrollController) => SafeArea(
-          top: false,
-          child: ValueListenableBuilder<List<SoilMeasurement>>(
-            valueListenable: _logs,
-            builder: (_, records, _) => LocalHistorySheet(
-              records: records,
-              scrollController: scrollController,
-              autoUploadMode: _autoUploadMode,
-              hasInternet: _hasInternet,
-              onAutoUploadChanged: _setAutoUpload,
-              onRetryPending: _retryPendingUploads,
-              onClear: () async {
-                if (_pendingRetry != null) return;
-                final confirmed = await showDialog<bool>(
-                  context: ctx,
-                  builder: (dialogContext) => AlertDialog(
-                    title: Text(
-                      context.tr(
-                        'ล้างประวัติทั้งหมดหรือไม่',
-                        'Clear all history?',
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+        child: DraggableScrollableSheet(
+          expand: false,
+          minChildSize: MediaQuery.orientationOf(ctx) == Orientation.landscape
+              ? 0.45
+              : 0.25,
+          initialChildSize:
+              MediaQuery.orientationOf(ctx) == Orientation.landscape
+              ? 0.84
+              : 0.65,
+          maxChildSize: 0.92,
+          builder: (_, scrollController) => SafeArea(
+            top: false,
+            child: ValueListenableBuilder<List<SoilMeasurement>>(
+              valueListenable: _logs,
+              builder: (_, records, _) => LocalHistorySheet(
+                records: records,
+                scrollController: scrollController,
+                autoUploadMode: _autoUploadMode,
+                hasInternet: _hasInternet,
+                onAutoUploadChanged: _setAutoUpload,
+                onRetryPending: _retryPendingUploads,
+                onClear: () async {
+                  if (_pendingRetry != null) return;
+                  final confirmed = await showDialog<bool>(
+                    context: ctx,
+                    builder: (dialogContext) => AlertDialog(
+                      scrollable: true,
+                      title: Text(
+                        context.tr(
+                          'ล้างประวัติทั้งหมดหรือไม่',
+                          'Clear all history?',
+                        ),
                       ),
+                      content: Text(
+                        context.tr(
+                          'ระบบจะลบบันทึกที่เก็บไว้ในเครื่องนี้',
+                          'This deletes saved records on this device only.',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: Text(context.tr('ยกเลิก', 'Cancel')),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: Text(context.tr('ลบ', 'Delete')),
+                        ),
+                      ],
                     ),
-                    content: Text(
-                      context.tr(
-                        'ระบบจะลบบันทึกที่เก็บไว้ในเครื่องนี้',
-                        'This deletes saved records on this device only.',
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext, false),
-                        child: Text(context.tr('ยกเลิก', 'Cancel')),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(dialogContext, true),
-                        child: Text(context.tr('ลบ', 'Delete')),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed != true ||
-                    !ctx.mounted ||
-                    _pendingRetry != null) {
-                  return;
-                }
-                await _queueLogWrite(() async {
-                  if (!mounted || _pendingRetry != null) return;
-                  if (await _storageService.clearHistory() && mounted) {
-                    _seenLogCount = 0;
-                    _acceptedUploads.clear();
-                    _replaceLocalLogs([]);
+                  );
+                  if (confirmed != true ||
+                      !ctx.mounted ||
+                      _pendingRetry != null) {
+                    return;
                   }
-                });
-              },
+                  await _queueLogWrite(() async {
+                    if (!mounted || _pendingRetry != null) return;
+                    if (await _storageService.clearHistory() && mounted) {
+                      _seenLogCount = 0;
+                      _acceptedUploads.clear();
+                      _replaceLocalLogs([]);
+                    }
+                  });
+                },
+              ),
             ),
           ),
         ),
@@ -751,6 +794,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Export Raw Log Modal ----------
   void _openExportView() {
+    _measurementNameFocusNode.unfocus();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -938,10 +982,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             counterText: '',
             isDense: compact,
             contentPadding: phone
-                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 10)
+                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
                 : null,
             prefixIconConstraints: phone
-                ? const BoxConstraints(minWidth: 36, minHeight: 44)
+                ? const BoxConstraints(minWidth: 34, minHeight: 40)
                 : null,
             prefixIcon: Icon(
               Icons.label_outline_rounded,
@@ -955,6 +999,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'Measurement name history',
                     ),
                     icon: Icon(Icons.arrow_drop_down, size: phone ? 18 : null),
+                    constraints: phone
+                        ? const BoxConstraints(minWidth: 44, minHeight: 40)
+                        : null,
                     onPressed: _isMeasuring
                         ? null
                         : () {
@@ -987,7 +1034,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final labelStyle = isThai
         ? const TextStyle(fontWeight: FontWeight.bold)
         : AppFonts.manropeBold;
-    return Column(
+    final content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(Icons.play_arrow_rounded, color: Colors.white, size: iconSize),
@@ -1002,10 +1049,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       ],
     );
+    return fontSize < 11
+        ? FittedBox(fit: BoxFit.scaleDown, child: content)
+        : content;
   }
 
   /// Circular START button for portrait mode
-  Widget _buildCircleStartButton() {
+  Widget _buildCircleStartButton(double diameter, {required bool phone}) {
     final isReady = _usbStatus == UsbConnectionStatus.ready;
     final bgColor = _isMeasuring
         ? AppColors.appbarBlue
@@ -1016,8 +1066,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return GestureDetector(
       onTap: _isMeasuring ? null : _triggerRead,
       child: Container(
-        width: _portraitStartDiameter,
-        height: _portraitStartDiameter,
+        key: const ValueKey('portrait-measure-button'),
+        width: diameter,
+        height: diameter,
         decoration: BoxDecoration(shape: BoxShape.circle, color: bgColor),
         child: Center(
           child: _isMeasuring
@@ -1042,14 +1093,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 )
-              : _buildMeasureButtonLabel(isReady, iconSize: 30),
+              : _buildMeasureButtonLabel(
+                  isReady,
+                  iconSize: phone ? 21 : 30,
+                  fontSize: phone ? 9 : 11,
+                ),
         ),
       ),
     );
   }
 
   /// Half-circle START button for landscape mode (bottom center, overlapping map & cards)
-  Widget _buildHalfCircleStartButton() {
+  Widget _buildHalfCircleStartButton(double radius, {required bool phone}) {
     final isReady = _usbStatus == UsbConnectionStatus.ready;
     final bgColor = _isMeasuring
         ? AppColors.appbarBlue
@@ -1060,16 +1115,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return GestureDetector(
       onTap: _isMeasuring ? null : _triggerRead,
       child: Container(
-        width: 132,
-        height: 64,
+        key: ValueKey(phone ? 'portrait-measure-button' : 'landscape-measure-button'),
+        width: radius * 2,
+        height: radius - 2,
         decoration: BoxDecoration(
           color: bgColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(66)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(radius)),
         ),
         child: Align(
           alignment: Alignment.center,
           child: Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: EdgeInsets.only(top: phone ? 4 : 8),
             child: _isMeasuring
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1092,14 +1148,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ],
                   )
-                : _buildMeasureButtonLabel(isReady, iconSize: 22),
+                : _buildMeasureButtonLabel(
+                    isReady,
+                    iconSize: phone ? 19 : 22,
+                    fontSize: phone ? 10 : 11,
+                  ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildPhoneMeasureButton() {
+  Widget _buildLandscapePhoneControl() {
     final isReady = _usbStatus == UsbConnectionStatus.ready;
     final color = _isMeasuring
         ? AppColors.appbarBlue
@@ -1107,47 +1167,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ? AppColors.softBlue
         : AppColors.disabledStart;
     return Material(
-      key: const ValueKey('phone-measure-button'),
+      key: const ValueKey('landscape-measure-button'),
       color: color,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(9),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: _isMeasuring ? null : _triggerRead,
         child: SizedBox(
-          width: 96,
-          height: 48,
+          width: 86,
+          height: 42,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
             child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: _isMeasuring
-                    ? Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '$_countdownSeconds',
-                            style: AppFonts.manropeBold.copyWith(
-                              fontSize: 16,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ],
-                      )
-                    : _buildMeasureButtonLabel(
-                        isReady,
-                        iconSize: 18,
-                        fontSize: 10,
+              child: _isMeasuring
+                  ? Text(
+                      '$_countdownSeconds',
+                      style: AppFonts.manropeBold.copyWith(
+                        color: Colors.white,
+                        fontSize: 16,
                       ),
-              ),
+                    )
+                  : _buildMeasureButtonLabel(isReady, iconSize: 15, fontSize: 9),
             ),
           ),
         ),
@@ -1158,15 +1198,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ---------- Sensor grid ----------
   Widget _buildSensorGrid({
     required int columns,
-    double aspectRatio = 1,
-    double? cardHeight,
+    required double aspectRatio,
     bool isPortrait = false,
     bool phone = false,
   }) {
     const portraitStartCutoutRadius = 52.0;
     final hasCutout = isPortrait && !phone;
     final valueFontSize = phone
-        ? (isPortrait ? 30.0 : 25.0)
+        ? (isPortrait ? 28.0 : 24.0)
         : (isPortrait ? 38.0 : 34.0);
     return GridView.count(
       crossAxisCount: columns,
@@ -1176,7 +1215,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisSpacing: _sensorGridSpacing,
       mainAxisSpacing: _sensorGridSpacing,
       childAspectRatio: aspectRatio,
-      mainAxisExtent: cardHeight,
       children: [
         SensorCard(
           title: context.tr('ความชื้น', 'Moisture'),
@@ -1279,6 +1317,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final size = MediaQuery.of(context).size;
     final isPortrait = size.height > size.width;
     final phone = size.shortestSide < 480;
+    final body = isPortrait ? _buildPortrait(phone) : _buildLandscape(phone);
 
     final language = AppLanguage.of(context);
     final dashboard = Scaffold(
@@ -1290,16 +1329,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: EdgeInsets.all(phone ? 4 : 5),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(7),
+              width: phone ? 29 : 34,
+              height: phone ? 29 : 34,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.all(Radius.circular(6)),
               ),
+              clipBehavior: Clip.antiAlias,
               child: Image.asset(
                 'assets/meta_soil_logo.png',
-                width: phone ? 21 : 24,
-                height: phone ? 21 : 24,
                 fit: BoxFit.contain,
+                excludeFromSemantics: true,
               ),
             ),
             const SizedBox(width: 8),
@@ -1390,11 +1430,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       body: SafeArea(
         maintainBottomViewPadding: true,
-        child: phone
-            ? _buildPhoneLayout(isPortrait)
-            : isPortrait
-            ? _buildPortrait(size)
-            : _buildLandscape(size),
+        child: phone ? _fitPhoneBody(body, isPortrait) : body,
       ),
     );
     return PopScope(
@@ -1433,101 +1469,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildPhoneLayout(bool isPortrait) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const padding = 8.0;
-        final textScale = math.max(
-          1.0,
-          MediaQuery.textScalerOf(context).scale(12) / 12,
-        );
-        final columns = isPortrait || constraints.maxWidth < 560 ? 2 : 4;
-        final rows = 8 ~/ columns;
-        final cardHeight = 74 * textScale;
-        final gridHeight =
-            rows * cardHeight + (rows - 1) * _sensorGridSpacing;
-        final minHeight =
-            gridHeight + 100 * textScale + 2 * padding +
-            (isPortrait ? 112.0 : 0.0);
-        final controls = Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildGpsBar(),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildMeasurementNameInput(compact: true, phone: true),
-                ),
-                const SizedBox(width: 6),
-                _buildPhoneMeasureButton(),
-              ],
-            ),
-          ],
-        );
-        final grid = _buildSensorGrid(
-          columns: columns,
-          cardHeight: cardHeight,
-          isPortrait: isPortrait,
-          phone: true,
-        );
-        final content = SizedBox(
-          height: math.max(minHeight, constraints.maxHeight),
-          child: Padding(
-            padding: const EdgeInsets.all(padding),
-            child: isPortrait
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: _buildMap()),
-                      const SizedBox(height: 6),
-                      controls,
-                      const SizedBox(height: 6),
-                      grid,
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(flex: 3, child: _buildMap()),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 5,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [controls, const SizedBox(height: 6), grid],
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-        );
-        return minHeight > constraints.maxHeight
-            ? SingleChildScrollView(child: content)
-            : content;
-      },
-    );
-  }
+  Widget _fitPhoneBody(Widget body, bool isPortrait) => LayoutBuilder(
+    builder: (context, constraints) {
+      final textScale = math.max(
+        1.0,
+        MediaQuery.textScalerOf(context).scale(11) / 11,
+      );
+      final minimumHeight = isPortrait
+          ? 74 + _phonePortraitStartRadius + 410 * textScale
+          : 30 + 204 * textScale;
+      if (constraints.maxHeight >= minimumHeight) return body;
+      return SingleChildScrollView(
+        child: SizedBox(height: minimumHeight, child: body),
+      );
+    },
+  );
 
   // ============================================================
   // PORTRAIT — Map top, GPS/Name, 8 cards with circle START button between the 4 cards
   // Fits completely on one screen without scrolling
   // ============================================================
-  Widget _buildPortrait(Size size) {
-    return Padding(
+  Widget _buildPortrait(bool phone) {
+    final content = Padding(
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // MAP — top
-          Expanded(flex: 7, child: _buildMap()),
+          Expanded(flex: phone ? 6 : 7, child: _buildMap()),
 
           const SizedBox(height: 6),
 
           // GPS bar + Name input under map
           _buildGpsBar(),
           const SizedBox(height: 4),
-          _buildMeasurementNameInput(compact: true),
+          _buildMeasurementNameInput(compact: true, phone: phone),
           const SizedBox(height: 6),
 
           // SENSOR GRID — 2 columns x 4 rows with circle START button in center between Row 3 & 4
@@ -1537,23 +1513,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
               builder: (ctx, bc) {
                 final cardH = (bc.maxHeight - 3 * _sensorGridSpacing) / 4;
                 final cardW = (bc.maxWidth - _sensorGridSpacing) / 2;
-                final ratio = cardW / cardH;
+                final grid = _buildSensorGrid(
+                  columns: 2,
+                  aspectRatio: cardW / cardH,
+                  isPortrait: true,
+                  phone: phone,
+                );
+                if (phone) return grid;
                 final centerX = bc.maxWidth / 2;
                 final centerY = 3 * cardH + 2.5 * _sensorGridSpacing;
                 const buttonRadius = _portraitStartDiameter / 2;
                 return Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    _buildSensorGrid(
-                      columns: 2,
-                      aspectRatio: ratio,
-                      isPortrait: true,
-                    ),
+                    grid,
                     // Floating circular START button — exactly at the center between the 4 cards
                     Positioned(
                       left: centerX - buttonRadius,
                       top: centerY - buttonRadius,
-                      child: _buildCircleStartButton(),
+                      child: _buildCircleStartButton(_portraitStartDiameter, phone: false),
                     ),
                   ],
                 );
@@ -1563,13 +1541,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
     );
+    if (!phone) return content;
+    return Column(
+      children: [
+        Expanded(child: content),
+        _buildHalfCircleStartButton(_phonePortraitStartRadius, phone: true),
+      ],
+    );
   }
 
   // ============================================================
   // LANDSCAPE — Map left, right: GPS + Name + 4x2 grid; floating half-circle START at bottom center
   // ============================================================
-  Widget _buildLandscape(Size size) {
+  Widget _buildLandscape(bool phone) {
     const contentPadding = 8.0;
+    const buttonRadius = 66.0;
     final cardMargin =
         CardTheme.of(context).margin?.resolve(Directionality.of(context)) ??
         const EdgeInsets.all(4);
@@ -1579,7 +1565,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Padding(
           padding: const EdgeInsets.all(contentPadding),
           child: ClipPath(
-            clipper: const _LandscapeStartCutout(bottomInset: contentPadding),
+            clipper: _LandscapeStartCutout(
+              bottomInset: contentPadding,
+              radius: phone ? 0 : buttonRadius + 2,
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -1604,7 +1593,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       _buildGpsBar(),
                       const SizedBox(height: 4),
-                      _buildMeasurementNameInput(compact: true),
+                      if (phone)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildMeasurementNameInput(
+                                compact: true,
+                                phone: true,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            _buildLandscapePhoneControl(),
+                          ],
+                        )
+                      else
+                        _buildMeasurementNameInput(compact: true),
                       const SizedBox(height: 6),
                       // Grid fills remaining space: 4 cols x 2 rows
                       Expanded(
@@ -1619,6 +1622,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               columns: 4,
                               aspectRatio: ratio,
                               isPortrait: false,
+                              phone: phone,
                             );
                           },
                         ),
@@ -1632,11 +1636,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
 
         // Enlarged floating half-circle START button at bottom center (overlapping map & cards)
-        Positioned(
+        if (!phone) Positioned(
           bottom: 0,
           left: 0,
           right: 0,
-          child: Center(child: _buildHalfCircleStartButton()),
+          child: Center(
+            child: _buildHalfCircleStartButton(buttonRadius, phone: false),
+          ),
         ),
       ],
     );
@@ -1645,22 +1651,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 /// Cuts the same circle from both sides of the landscape layout.
 class _LandscapeStartCutout extends CustomClipper<Path> {
-  const _LandscapeStartCutout({required this.bottomInset});
+  const _LandscapeStartCutout({required this.bottomInset, required this.radius});
 
   final double bottomInset;
+  final double radius;
 
   @override
   Path getClip(Size size) {
     final rectPath = Path()..addRect(Offset.zero & size);
+    if (radius == 0) return rectPath;
     // The button baseline is at the bottom of the stack, below the content.
     final circleCenter = Offset(size.width / 2, size.height + bottomInset);
     final circlePath = Path()
-      ..addOval(Rect.fromCircle(center: circleCenter, radius: 68));
+      ..addOval(Rect.fromCircle(center: circleCenter, radius: radius));
 
     return Path.combine(PathOperation.difference, rectPath, circlePath);
   }
 
   @override
   bool shouldReclip(covariant _LandscapeStartCutout oldClipper) =>
-      oldClipper.bottomInset != bottomInset;
+      oldClipper.bottomInset != bottomInset || oldClipper.radius != radius;
 }

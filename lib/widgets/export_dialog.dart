@@ -111,201 +111,210 @@ class _ExportDialogState extends State<ExportDialog> {
     final distinctDates = _availableDates.toList()
       ..sort((a, b) => b.compareTo(a));
 
+    final header = Row(
+      children: [
+        const Icon(Icons.file_download_outlined, color: AppColors.softBlue),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            context.tr('ส่งออกข้อมูลดิบ', 'Export raw logs'),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    );
+    final exportButton = ElevatedButton.icon(
+      onPressed: _isExporting || selectedCount == 0 ? null : _doExport,
+      icon: _isExporting
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.share_rounded),
+      label: Text(
+        _isExporting
+            ? context.tr('กำลังส่งออก...', 'Exporting...')
+            : selectedCount == 0
+            ? context.tr('ส่งออก 0 รายการ', 'Export 0 items')
+            : context.tr(
+                'ส่งออก $selectedCount รายการ ($_format)',
+                'Export $selectedCount items ($_format)',
+              ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.softBlue,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.grey.shade300,
+        disabledForegroundColor: Colors.grey.shade700,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    );
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final scrollAll = constraints.maxHeight < 180;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
-                  Icons.file_download_outlined,
-                  color: AppColors.softBlue,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    context.tr('ส่งออกข้อมูลดิบ', 'Export raw logs'),
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                if (!scrollAll) ...[header, const SizedBox(height: 8)],
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (scrollAll) ...[header, const SizedBox(height: 8)],
+                        // Format selection
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          children: [
+                            Text(
+                              context.tr('รูปแบบไฟล์: ', 'File format: '),
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            ChoiceChip(
+                              label: const Text('CSV (Raw samples)'),
+                              selected: _format == 'csv',
+                              onSelected: (val) =>
+                                  setState(() => _format = 'csv'),
+                            ),
+                            ChoiceChip(
+                              label: const Text('JSON (Full data)'),
+                              selected: _format == 'json',
+                              onSelected: (val) =>
+                                  setState(() => _format = 'json'),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 20),
+                        // Selection options
+                        Text(
+                          context.tr(
+                            'เลือกข้อมูลที่จะส่งออก:',
+                            'Select items to export:',
+                          ),
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        CheckboxListTile(
+                          dense: true,
+                          title: Text(
+                            context.tr(
+                              'ทั้งหมด (${widget.records.length} รายการ)',
+                              'All (${widget.records.length} items)',
+                            ),
+                          ),
+                          value: _selectAll,
+                          activeColor: AppColors.softBlue,
+                          onChanged: (val) {
+                            setState(() {
+                              _selectAll = val ?? false;
+                              if (_selectAll) {
+                                _selectedNames.clear();
+                                _selectedDates.clear();
+                              }
+                            });
+                          },
+                        ),
+                        if (!_selectAll) ...[
+                          if (distinctNames.isNotEmpty) ...[
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                context.tr(
+                                  'เลือกตามชื่อการวัด:',
+                                  'By measurement name:',
+                                ),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                            Wrap(
+                              spacing: 6,
+                              children: distinctNames.map((name) {
+                                final isChecked = _selectedNames.contains(name);
+                                return FilterChip(
+                                  label: Text(name),
+                                  selected: isChecked,
+                                  onSelected: (selected) {
+                                    setState(() {
+                                      if (selected) {
+                                        _selectedNames.add(name);
+                                      } else {
+                                        _selectedNames.remove(name);
+                                      }
+                                      _selectedDates.retainAll(_availableDates);
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                          if (distinctDates.isNotEmpty) ...[
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                context.tr('เลือกตามวันที่:', 'By date:'),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                            Wrap(
+                              spacing: 6,
+                              children: distinctDates.map((date) {
+                                final isChecked = _selectedDates.contains(date);
+                                return FilterChip(
+                                  label: Text(date),
+                                  selected: isChecked,
+                                  onSelected: (selected) {
+                                    setState(() {
+                                      if (selected) {
+                                        _selectedDates.add(date);
+                                      } else {
+                                        _selectedDates.remove(date);
+                                      }
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ],
+                        if (scrollAll) ...[
+                          const SizedBox(height: 12),
+                          exportButton,
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
+                if (!scrollAll) ...[const SizedBox(height: 12), exportButton],
               ],
-            ),
-            const SizedBox(height: 8),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Format selection
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 8,
-                      children: [
-                        Text(
-                          context.tr('รูปแบบไฟล์: ', 'File format: '),
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        ChoiceChip(
-                          label: const Text('CSV (Raw samples)'),
-                          selected: _format == 'csv',
-                          onSelected: (val) => setState(() => _format = 'csv'),
-                        ),
-                        ChoiceChip(
-                          label: const Text('JSON (Full data)'),
-                          selected: _format == 'json',
-                          onSelected: (val) => setState(() => _format = 'json'),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 20),
-                    // Selection options
-                    Text(
-                      context.tr(
-                        'เลือกข้อมูลที่จะส่งออก:',
-                        'Select items to export:',
-                      ),
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    CheckboxListTile(
-                      dense: true,
-                      title: Text(
-                        context.tr(
-                          'ทั้งหมด (${widget.records.length} รายการ)',
-                          'All (${widget.records.length} items)',
-                        ),
-                      ),
-                      value: _selectAll,
-                      activeColor: AppColors.softBlue,
-                      onChanged: (val) {
-                        setState(() {
-                          _selectAll = val ?? false;
-                          if (_selectAll) {
-                            _selectedNames.clear();
-                            _selectedDates.clear();
-                          }
-                        });
-                      },
-                    ),
-                    if (!_selectAll) ...[
-                      if (distinctNames.isNotEmpty) ...[
-                        Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            context.tr(
-                              'เลือกตามชื่อการวัด:',
-                              'By measurement name:',
-                            ),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                        Wrap(
-                          spacing: 6,
-                          children: distinctNames.map((name) {
-                            final isChecked = _selectedNames.contains(name);
-                            return FilterChip(
-                              label: Text(name),
-                              selected: isChecked,
-                              onSelected: (selected) {
-                                setState(() {
-                                  if (selected) {
-                                    _selectedNames.add(name);
-                                  } else {
-                                    _selectedNames.remove(name);
-                                  }
-                                  _selectedDates.retainAll(_availableDates);
-                                });
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                      if (distinctDates.isNotEmpty) ...[
-                        Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: Text(
-                            context.tr('เลือกตามวันที่:', 'By date:'),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        ),
-                        Wrap(
-                          spacing: 6,
-                          children: distinctDates.map((date) {
-                            final isChecked = _selectedDates.contains(date);
-                            return FilterChip(
-                              label: Text(date),
-                              selected: isChecked,
-                              onSelected: (selected) {
-                                setState(() {
-                                  if (selected) {
-                                    _selectedDates.add(date);
-                                  } else {
-                                    _selectedDates.remove(date);
-                                  }
-                                });
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: _isExporting || selectedCount == 0 ? null : _doExport,
-              icon: _isExporting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.share_rounded),
-              label: Text(
-                _isExporting
-                    ? context.tr('กำลังส่งออก...', 'Exporting...')
-                    : selectedCount == 0
-                    ? context.tr('ส่งออก 0 รายการ', 'Export 0 items')
-                    : context.tr(
-                        'ส่งออก $selectedCount รายการ ($_format)',
-                        'Export $selectedCount items ($_format)',
-                      ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.softBlue,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: Colors.grey.shade300,
-                disabledForegroundColor: Colors.grey.shade700,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
