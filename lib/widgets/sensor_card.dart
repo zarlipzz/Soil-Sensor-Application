@@ -61,6 +61,7 @@ class SensorCard extends StatelessWidget {
   final double cutoutRadius;
   final bool unitOnRight;
   final double valueFontSize;
+  final bool compact;
 
   const SensorCard({
     super.key,
@@ -75,6 +76,7 @@ class SensorCard extends StatelessWidget {
     this.cutoutRadius = 46.0,
     this.unitOnRight = true,
     this.valueFontSize = 34,
+    this.compact = false,
   });
 
   String get _displayUnit => unit ?? _extractUnit(value);
@@ -94,6 +96,7 @@ class SensorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
+    if (compact) return _buildCompactCard(isLandscape);
     final shortTitle = abbreviation;
     const titleStyle = TextStyle(
       fontSize: 12,
@@ -202,6 +205,92 @@ class SensorCard extends StatelessWidget {
     return ClipPath(
       clipper: CornerCutoutClipper(corner: cornerCutout, radius: cutoutRadius),
       child: cardWidget,
+    );
+  }
+
+  Widget _buildCompactCard(bool isLandscape) {
+    const titleStyle = TextStyle(
+      fontSize: 11,
+      height: 1.15,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFF475569),
+    );
+    final symbol = Icon(icon, color: color, size: 13);
+    final abbreviationLabel = abbreviation == null ? null : '($abbreviation)';
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (isLandscape) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(abbreviationLabel ?? '', style: titleStyle),
+                  ),
+                  symbol,
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(title, style: titleStyle, maxLines: 1),
+                ),
+              ),
+            ] else
+              Row(
+                children: [
+                  const SizedBox(width: 17),
+                  Expanded(
+                    child: Text(
+                      abbreviationLabel == null
+                          ? title
+                          : '$abbreviationLabel $title',
+                      style: titleStyle,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  symbol,
+                ],
+              ),
+            Expanded(
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _displayValue,
+                    style: AppFonts.manropeBold.copyWith(
+                      color: color,
+                      fontSize: valueFontSize,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text(
+                _displayUnit.isEmpty ? ' ' : _displayUnit,
+                key: Key('sensor-unit-$title'),
+                style: AppFonts.manropeSemiBold.copyWith(
+                  fontSize: 9,
+                  height: 1.1,
+                  color: const Color(0xFF64748B),
+                ),
+                maxLines: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

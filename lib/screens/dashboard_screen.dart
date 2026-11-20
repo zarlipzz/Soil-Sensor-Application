@@ -1,5 +1,6 @@
 // Dashboard screen โ€” responsive for Samsung Galaxy Tab A9
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -868,7 +869,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   // ---------- Action buttons ----------
-  Widget _buildMeasurementNameInput({bool compact = false}) {
+  Widget _buildMeasurementNameInput({bool compact = false, bool phone = false}) {
     return LayoutBuilder(
       builder: (context, constraints) => MenuAnchor(
         controller: _measurementNameMenu,
@@ -913,6 +914,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           controller: _measurementNameController,
           focusNode: _measurementNameFocusNode,
           enabled: !_isMeasuring,
+          style: phone ? const TextStyle(fontSize: 14) : null,
           textInputAction: TextInputAction.done,
           maxLength: 80,
           onTap: () {
@@ -935,7 +937,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
             errorText: _measurementNameError,
             counterText: '',
             isDense: compact,
-            prefixIcon: const Icon(Icons.label_outline_rounded),
+            contentPadding: phone
+                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 10)
+                : null,
+            prefixIconConstraints: phone
+                ? const BoxConstraints(minWidth: 36, minHeight: 44)
+                : null,
+            prefixIcon: Icon(
+              Icons.label_outline_rounded,
+              size: phone ? 17 : null,
+            ),
             suffixIcon: _measurementNameHistory.isEmpty
                 ? null
                 : IconButton(
@@ -943,7 +954,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'ประวัติชื่อการวัด',
                       'Measurement name history',
                     ),
-                    icon: const Icon(Icons.arrow_drop_down),
+                    icon: Icon(Icons.arrow_drop_down, size: phone ? 18 : null),
                     onPressed: _isMeasuring
                         ? null
                         : () {
@@ -964,7 +975,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ---------- Floating START buttons ----------
 
-  Widget _buildMeasureButtonLabel(bool isReady, {required double iconSize}) {
+  Widget _buildMeasureButtonLabel(
+    bool isReady, {
+    required double iconSize,
+    double fontSize = 11,
+  }) {
     final label = isReady
         ? context.tr('กดเพื่อวัดค่า', 'Press\nto measure')
         : context.tr('ยังไม่พร้อม', 'Not Ready');
@@ -980,7 +995,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           label,
           textAlign: TextAlign.center,
           style: labelStyle.copyWith(
-            fontSize: 11,
+            fontSize: fontSize,
             height: 1.1,
             color: Colors.white,
           ),
@@ -1084,13 +1099,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildPhoneMeasureButton() {
+    final isReady = _usbStatus == UsbConnectionStatus.ready;
+    final color = _isMeasuring
+        ? AppColors.appbarBlue
+        : isReady
+        ? AppColors.softBlue
+        : AppColors.disabledStart;
+    return Material(
+      key: const ValueKey('phone-measure-button'),
+      color: color,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _isMeasuring ? null : _triggerRead,
+        child: SizedBox(
+          width: 96,
+          height: 48,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+            child: Center(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _isMeasuring
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '$_countdownSeconds',
+                            style: AppFonts.manropeBold.copyWith(
+                              fontSize: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      )
+                    : _buildMeasureButtonLabel(
+                        isReady,
+                        iconSize: 18,
+                        fontSize: 10,
+                      ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ---------- Sensor grid ----------
   Widget _buildSensorGrid({
     required int columns,
-    required double aspectRatio,
+    double aspectRatio = 1,
+    double? cardHeight,
     bool isPortrait = false,
+    bool phone = false,
   }) {
     const portraitStartCutoutRadius = 52.0;
+    final hasCutout = isPortrait && !phone;
+    final valueFontSize = phone
+        ? (isPortrait ? 30.0 : 25.0)
+        : (isPortrait ? 38.0 : 34.0);
     return GridView.count(
       crossAxisCount: columns,
       shrinkWrap: true,
@@ -1099,6 +1176,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       crossAxisSpacing: _sensorGridSpacing,
       mainAxisSpacing: _sensorGridSpacing,
       childAspectRatio: aspectRatio,
+      mainAxisExtent: cardHeight,
       children: [
         SensorCard(
           title: context.tr('ความชื้น', 'Moisture'),
@@ -1107,7 +1185,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: '%',
           icon: Icons.water_drop_rounded,
           color: AppColors.moistureColor,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('อุณหภูมิ', 'Temperature'),
@@ -1116,7 +1195,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: '°C',
           icon: Icons.thermostat_rounded,
           color: AppColors.tempColor,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('ค่าความเป็นกรด/ด่าง', 'Acidity/alkalinity'),
@@ -1125,7 +1205,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: '',
           icon: Icons.science_rounded,
           color: AppColors.phColor,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('ค่าการนำไฟฟ้า', 'Electrical conductivity'),
@@ -1134,7 +1215,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: 'µS/cm',
           icon: Icons.bolt_rounded,
           color: AppColors.ecColor,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('ไนโตรเจน', 'Nitrogen'),
@@ -1143,11 +1225,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: 'mg/kg',
           icon: Icons.grass_rounded,
           color: AppColors.nitrogenColor,
-          cornerCutout: isPortrait
+          cornerCutout: hasCutout
               ? CornerCutout.bottomRight
               : CornerCutout.none,
           cutoutRadius: portraitStartCutoutRadius,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('ฟอสฟอรัส', 'Phosphorus'),
@@ -1156,11 +1239,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: 'mg/kg',
           icon: Icons.grain_rounded,
           color: AppColors.phosphorusColor,
-          cornerCutout: isPortrait
+          cornerCutout: hasCutout
               ? CornerCutout.bottomLeft
               : CornerCutout.none,
           cutoutRadius: isPortrait ? portraitStartCutoutRadius : 46.0,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('โพแทสเซียม', 'Potassium'),
@@ -1169,9 +1253,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: 'mg/kg',
           icon: Icons.spa_rounded,
           color: AppColors.potassiumColor,
-          cornerCutout: isPortrait ? CornerCutout.topRight : CornerCutout.none,
+          cornerCutout: hasCutout ? CornerCutout.topRight : CornerCutout.none,
           cutoutRadius: isPortrait ? portraitStartCutoutRadius : 46.0,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
         SensorCard(
           title: context.tr('ความเค็ม', 'Salinity'),
@@ -1180,9 +1265,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           unit: 'mg/L',
           icon: Icons.waves_rounded,
           color: AppColors.salinityColor,
-          cornerCutout: isPortrait ? CornerCutout.topLeft : CornerCutout.none,
+          cornerCutout: hasCutout ? CornerCutout.topLeft : CornerCutout.none,
           cutoutRadius: isPortrait ? portraitStartCutoutRadius : 46.0,
-          valueFontSize: isPortrait ? 38 : 34,
+          valueFontSize: valueFontSize,
+          compact: phone,
         ),
       ],
     );
@@ -1192,25 +1278,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isPortrait = size.height > size.width;
+    final phone = size.shortestSide < 480;
 
     final language = AppLanguage.of(context);
     final dashboard = Scaffold(
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         titleSpacing: 8,
+        toolbarHeight: phone ? 48 : null,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.all(5),
+              padding: EdgeInsets.all(phone ? 4 : 5),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Image.asset(
                 'assets/meta_soil_logo.png',
-                width: 24,
-                height: 24,
+                width: phone ? 21 : 24,
+                height: phone ? 21 : 24,
                 fit: BoxFit.contain,
               ),
             ),
@@ -1222,14 +1310,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Text(
                     AppConstants.appTitle,
-                    style: AppFonts.manropeBold.copyWith(fontSize: 14),
+                    style: AppFonts.manropeBold.copyWith(
+                      fontSize: phone ? 13 : 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     AppConstants.appSubtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppFonts.manrope.copyWith(
-                      fontSize: 10,
+                      fontSize: phone ? 9 : 10,
                       color: Colors.white70,
                     ),
                   ),
@@ -1247,12 +1339,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 language.isThai ? 'TH' : 'EN',
                 style: AppFonts.manropeBold.copyWith(
                   color: Colors.white,
-                  fontSize: 15,
+                  fontSize: phone ? 13 : 15,
                 ),
               ),
             ),
           // Export Raw Log icon on AppBar (Requirement 9)
           IconButton(
+            iconSize: phone ? 20 : null,
             icon: const Icon(Icons.file_download_outlined),
             tooltip: context.tr('ส่งออกข้อมูลดิบ', 'Export raw log'),
             onPressed: _openExportView,
@@ -1262,6 +1355,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             alignment: Alignment.center,
             children: [
               IconButton(
+                iconSize: phone ? 20 : null,
                 icon: const Icon(Icons.history_rounded),
                 tooltip: context.tr('บันทึกในเครื่อง', 'Local Logs'),
                 onPressed: _openLocalLogsView,
@@ -1296,7 +1390,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       body: SafeArea(
         maintainBottomViewPadding: true,
-        child: isPortrait ? _buildPortrait(size) : _buildLandscape(size),
+        child: phone
+            ? _buildPhoneLayout(isPortrait)
+            : isPortrait
+            ? _buildPortrait(size)
+            : _buildLandscape(size),
       ),
     );
     return PopScope(
@@ -1332,6 +1430,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildPhoneLayout(bool isPortrait) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const padding = 8.0;
+        final textScale = math.max(
+          1.0,
+          MediaQuery.textScalerOf(context).scale(12) / 12,
+        );
+        final columns = isPortrait || constraints.maxWidth < 560 ? 2 : 4;
+        final rows = 8 ~/ columns;
+        final cardHeight = 74 * textScale;
+        final gridHeight =
+            rows * cardHeight + (rows - 1) * _sensorGridSpacing;
+        final minHeight =
+            gridHeight + 100 * textScale + 2 * padding +
+            (isPortrait ? 112.0 : 0.0);
+        final controls = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildGpsBar(),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildMeasurementNameInput(compact: true, phone: true),
+                ),
+                const SizedBox(width: 6),
+                _buildPhoneMeasureButton(),
+              ],
+            ),
+          ],
+        );
+        final grid = _buildSensorGrid(
+          columns: columns,
+          cardHeight: cardHeight,
+          isPortrait: isPortrait,
+          phone: true,
+        );
+        final content = SizedBox(
+          height: math.max(minHeight, constraints.maxHeight),
+          child: Padding(
+            padding: const EdgeInsets.all(padding),
+            child: isPortrait
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(child: _buildMap()),
+                      const SizedBox(height: 6),
+                      controls,
+                      const SizedBox(height: 6),
+                      grid,
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(flex: 3, child: _buildMap()),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [controls, const SizedBox(height: 6), grid],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+        return minHeight > constraints.maxHeight
+            ? SingleChildScrollView(child: content)
+            : content;
+      },
     );
   }
 
