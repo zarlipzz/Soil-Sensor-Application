@@ -17,11 +17,17 @@ bool matchesMeasurementNames(String name, Set<String> selectedNames) =>
 Set<String> availableMeasurementDates(
   Iterable<SoilMeasurement> records,
   Set<String> selectedNames,
-) => {
-  for (final record in records)
-    if (matchesMeasurementNames(measurementFilterName(record), selectedNames))
-      measurementFilterDate(record.timestamp),
-};
+) {
+  final dates = <DateTime>{};
+  for (final record in records) {
+    if (matchesMeasurementNames(measurementFilterName(record), selectedNames)) {
+      final date = record.timestamp;
+      dates.add(DateTime.utc(date.year, date.month, date.day));
+    }
+  }
+  final sorted = dates.toList()..sort((a, b) => b.compareTo(a));
+  return sorted.map(measurementFilterDate).toSet();
+}
 
 List<SoilMeasurement> filterHistory(
   Iterable<SoilMeasurement> records, {

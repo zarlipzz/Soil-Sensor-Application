@@ -1,7 +1,6 @@
 # Meta Soil working context
 
-Updated 2026-11-20 (Asia/Bangkok). The Android app is **1.5.5**, build **2**.
-The latest app commit at the time of this update is `24bfd7e`.
+Updated 2026-11-24 (Asia/Bangkok). The Android app is **1.5.7**, build **4**.
 
 ## Project
 
@@ -9,7 +8,7 @@ Meta Soil is a Flutter app for an 8-in-1 soil sensor connected through a CH340
 USB-to-serial adapter. It collects Modbus RTU samples, displays and stores the
 results locally, attaches GPS when available, and can send readings to Data Hub.
 
-The workspace root is `D:\Application_intern001\soil_app`. Paths in this
+The workspace root is `D:\EVERYTHING_WHILE_INTERN\Application_intern001\soil_app`. Paths in this
 document are relative to the repository root.
 
 ## Measurement and USB
@@ -35,7 +34,8 @@ document are relative to the repository root.
 - Completion averages the eight readings, keeps the 10 raw samples together,
   and stores one record under a unique measurement ID. The app attempts to get
   a current GPS fix before saving and stores coordinates, accuracy, and GPS
-  timestamp when available. The saving path still awaits that GPS request.
+  timestamp when available. The app waits up to four seconds for the fix,
+  then saves the result without coordinates if the fix is unavailable.
 - Local history uses SharedPreferences, newest first, with ID deduplication.
   When a new save exceeds the 200-record target, the oldest synced records are
   removed first. Pending records are retained, so the list can exceed 200.
@@ -159,6 +159,7 @@ consolidated into the same Git commit.
 | USB retry and device rollout, 20 Nov | Added Android attach filters, explicit USB permission checks, resume detection, and an in-app retry. RMX2001 reported OTG off while connected to the PC. Installed the app on OPPO A60 and verified that Data Hub credentials were stored on that device. |
 | Short landscape sheets, 20 Nov | Fixed the Local Log bottom overflow when the panel shrinks or the search keyboard opens. Added a short-screen export path so its action remains reachable. |
 | Meta Soil 1.5.5, 20 Nov | Set version `1.5.5+2`. Tried a white logo on a green circle, then switched to the full-color original on a white rounded square after visual review. Installed the final build and checked the app-bar logo on Galaxy Tab A9. These latest revisions are consolidated in `24bfd7e`. |
+| Meta Soil 1.5.7, 24 Nov | Set the bug-fix patch version to `1.5.7+4`. Limited the GPS wait when saving, isolated USB request timers, skipped corrupt local history rows, corrected date ordering in filters, and kept export selections after dismissing Android Share. |
 
 ## Main source files
 
@@ -193,9 +194,14 @@ An ignored `data-hub.local.json` may hold local values for `DATA_HUB_URL` and
 `DATA_HUB_API_KEY`. Passing it with `--dart-define-from-file` embeds the
 values at build time. Use in-app configuration for shared APKs.
 
-- The full Flutter suite passed all 47 tests on 2026-11-20, including mock USB permission
-  retry, measurement samples, queue behavior, pin visibility, export formats,
-  name/date filters, long values, and short landscape sheets.
+- The full Flutter suite passed all 51 tests on 2026-11-24, including GPS
+  timeout, USB request timing, corrupt history rows, and cross-year filters.
+- The 1.5.7 debug build installed over the previous version and launched
+  on Galaxy Tab A9 on 2026-11-24. Android reported version name `1.5.7`
+  and build number `4`. The installed APK hash matched the built file.
+- The 1.5.6 debug build installed over the previous version and launched
+  on Galaxy Tab A9 on 2026-11-24. Android reported version name `1.5.6`
+  and build number `3`. The installed APK hash matched the built file.
 - The final 1.5.5 debug build installed and launched on Galaxy Tab A9. Android
   reported version name `1.5.5` and build number `2`. The white rounded logo
   was visually checked on that device.
@@ -210,6 +216,5 @@ values at build time. Use in-app configuration for shared APKs.
 
 ## Follow-up ideas
 
-- Limit the time spent waiting for a GPS fix before saving.
 - Add local backup and restore.
 - Add per-plot trend graphs.

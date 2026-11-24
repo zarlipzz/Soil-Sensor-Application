@@ -253,7 +253,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final enabled = await _gpsService.isLocationServiceEnabled();
     if (!enabled || !await _gpsService.requestPermission()) return;
     final loc = await _gpsService.getCurrentLocation();
-    if (mounted && loc != null) setState(() => _currentGpsLocation = loc);
+    if (!mounted) return;
+    if (loc != null) setState(() => _currentGpsLocation = loc);
     _gpsPositionSubscription =
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
@@ -270,6 +271,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               timestamp: position.timestamp,
             ),
           );
+        }, onError: (Object error) {
+          debugPrint('[DashboardScreen] GPS tracking unavailable: $error');
         });
   }
 
@@ -354,7 +357,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _countdownSeconds = 10;
         _activeMeasurementName = null;
         _currentData = measurement;
-        _currentGpsLocation = gps;
+        final current = _currentGpsLocation;
+        if (gps != null &&
+            (current == null || !gps.timestamp.isBefore(current.timestamp))) {
+          _currentGpsLocation = gps;
+        }
       });
     }
     await _processNewMeasurement(measurement);

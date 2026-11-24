@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../utils/app_language.dart';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/soil_measurement.dart';
 import '../services/measurement_export_service.dart';
@@ -60,28 +61,32 @@ class _ExportDialogState extends State<ExportDialog> {
       return;
     }
 
+    final format = _format;
     setState(() => _isExporting = true);
     try {
       final directory = await getApplicationDocumentsDirectory();
       final file = await MeasurementExportService.writeExport(
         records: targets,
-        format: _format,
+        format: format,
         directory: directory,
         timestamp: DateTime.now(),
       );
-      await MeasurementExportService.shareExportFile(
+      if (!mounted) return;
+      final result = await MeasurementExportService.shareExportFile(
         file: file,
-        format: _format,
+        format: format,
         recordCount: targets.length,
       );
-      if (mounted) {
+      if (!mounted || result.status == ShareResultStatus.dismissed) return;
+      if (ModalRoute.of(context)?.isCurrent ?? false) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(
             content: Text(
               context.tr(
-                'ส่งออกไฟล์ ${_format.toUpperCase()} เรียบร้อย (${targets.length} รายการ)',
-                'Exported ${targets.length} items as ${_format.toUpperCase()}',
+                'เตรียมไฟล์ ${format.toUpperCase()} แล้ว (${targets.length} รายการ)',
+                'Prepared ${targets.length} items as ${format.toUpperCase()}',
               ),
             ),
             backgroundColor: AppColors.softBlue,
@@ -108,8 +113,7 @@ class _ExportDialogState extends State<ExportDialog> {
   Widget build(BuildContext context) {
     final selectedCount = _selectedRecords.length;
     final distinctNames = _distinctNames;
-    final distinctDates = _availableDates.toList()
-      ..sort((a, b) => b.compareTo(a));
+    final distinctDates = _availableDates;
 
     final header = Row(
       children: [

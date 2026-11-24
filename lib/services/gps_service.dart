@@ -83,17 +83,17 @@ class GpsService {
   }
 
   /// Retrieves the current position with accuracy and timestamp.
-  /// Provides fallback/simulated coordinates for Web and devices without active GPS fix.
-  Future<GpsLocationData?> getCurrentLocation({
-    bool allowSimulatedOnFallback = false,
-  }) async {
+  Future<GpsLocationData?> getCurrentLocation() async {
     _status = GpsStatus.searching;
     _lastError = null;
 
     try {
       // Use geolocator plugin for real GPS coordinates.
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 4),
+        ),
       );
       final location = GpsLocationData(
         latitude: position.latitude,

@@ -36,7 +36,8 @@ class UsbSerialService {
   bool _isConnected = false;
   bool _isInitializing = false;
   bool _isReady = false;
-  bool _isQueryInFlight = false;
+  Object? _pendingQuery;
+  Timer? _queryTimeout;
   bool _receivedValidInitializationFrame = false;
   bool _hasInitialized = false;
   bool _disposed = false;
@@ -243,11 +244,11 @@ class UsbSerialService {
         _incomingBuffer.removeRange(0, ModbusUtils.expectedResponseLength);
         if (!ModbusUtils.isValidPacket(candidate)) {
           debugPrint('[UsbSerialService] Invalid Modbus packet received.');
-          _isQueryInFlight = false;
+          _clearPendingQuery();
           onModbusQueryFailed?.call();
           continue;
         }
-        _isQueryInFlight = false;
+        _clearPendingQuery();
         if (_isInitializing) {
           _receivedValidInitializationFrame = true;
           continue;
@@ -261,24 +262,25 @@ class UsbSerialService {
 
   /// Sends the unchanged Modbus request only when the session can accept it.
   Future<bool> sendQuery({bool allowDuringInitialization = false}) async {
-    if (_port == null || !_isConnected || _isQueryInFlight) return false;
+    final port = _port;
+    if (port == null || !_isConnected || _pendingQuery != null) return false;
     if (!_isReady && !(allowDuringInitialization && _isInitializing)) {
       return false;
     }
+    final query = Object();
+    _pendingQuery = query;
+    _incomingBuffer.clear();
     try {
-      _isQueryInFlight = true;
-      _incomingBuffer.clear();
-      await _port!.write(ModbusUtils.queryCommand);
-      // There is no transaction callback in usb_serial. Release a silent query
-      // so the next warm-up poll or explicit read can proceed.
-      Timer(const Duration(milliseconds: 700), () {
-        if (!_isQueryInFlight) return;
-        _isQueryInFlight = false;
-        onModbusQueryFailed?.call();
-      });
+      await port.write(ModbusUtils.queryCommand);
+      if (identical(_pendingQuery, query)) {
+        _queryTimeout = Timer(const Duration(milliseconds: 700), () {
+          _clearPendingQuery();
+          onModbusQueryFailed?.call();
+        });
+      }
       return true;
     } catch (e) {
-      _isQueryInFlight = false;
+      if (!identical(_pendingQuery, query)) return false;
       debugPrint('[UsbSerialService] Modbus write failed: $e');
       _failSession();
       return false;
@@ -295,7 +297,14 @@ class UsbSerialService {
     return checkConnection(userInitiatedRetry: true);
   }
 
+  void _clearPendingQuery() {
+    _queryTimeout?.cancel();
+    _queryTimeout = null;
+    _pendingQuery = null;
+  }
+
   void _failSession() {
+    _clearPendingQuery();
     _isReady = false;
     _isInitializing = false;
     _initializationTimer?.cancel();
@@ -311,7 +320,7 @@ class UsbSerialService {
     _initializationPollTimer = null;
     _isInitializing = false;
     _isReady = false;
-    _isQueryInFlight = false;
+    _clearPendingQuery();
     _receivedValidInitializationFrame = false;
     _incomingBuffer.clear();
     await _subscription?.cancel();

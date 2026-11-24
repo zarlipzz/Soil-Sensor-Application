@@ -246,8 +246,7 @@ class _LocalHistorySheetState extends State<LocalHistorySheet> {
   Widget build(BuildContext context) {
     final filtered = _filteredRecords;
     final distinctNames = _distinctNames;
-    final distinctDates = _availableDates.toList()
-      ..sort((a, b) => b.compareTo(a));
+    final distinctDates = _availableDates;
     final hasSelection =
         widget.records.isNotEmpty &&
         (_selectAll || _selectedNames.isNotEmpty || _selectedDates.isNotEmpty);

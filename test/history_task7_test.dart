@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soil_app/models/soil_measurement.dart';
@@ -29,6 +31,35 @@ void main() {
     expect(filterHistory(records, query: 'earth', startDate: DateTime(2026, 11, 16), endDate: DateTime(2026, 11, 16)).map((r) => r.id), ['late']);
     expect(filterHistory(records, query: 'missing'), isEmpty);
     expect(filterHistory(records).first.id, 'late');
+  });
+
+  test('date filters are newest first across month and year boundaries', () {
+    final records = [
+      item('nov', 'Earth', DateTime(2026, 11, 30)),
+      item('dec', 'Earth', DateTime(2026, 12, 31)),
+      item('jan', 'Earth', DateTime(2027, 1, 1)),
+      item('jan2', 'Earth', DateTime(2027, 1, 1, 10)),
+      item('water', 'Water', DateTime(2027, 2, 1)),
+    ];
+    expect(availableMeasurementDates(records, {'Earth'}).toList(), [
+      '01/01/2027',
+      '31/12/2026',
+      '30/11/2026',
+    ]);
+  });
+
+  test('loads good records even when other local records are unreadable', () async {
+    const key = 'history_key';
+    SharedPreferences.setMockInitialValues({
+      key: [
+        jsonEncode(item('one', 'Earth', DateTime(2026, 11, 15)).toJson()),
+        'bad JSON',
+        '[]',
+        jsonEncode(item('two', 'Water', DateTime(2026, 11, 14)).toJson()),
+      ],
+    });
+    final records = await LocalStorageService(prefKey: key).loadMeasurements();
+    expect(records.map((record) => record.id), ['one', 'two']);
   });
 
   test('old JSON without raw samples or metadata remains readable', () {

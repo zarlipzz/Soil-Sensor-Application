@@ -48,7 +48,8 @@ class _MapScreenState extends State<MapScreen> {
     final enabled = await _gpsService.isLocationServiceEnabled();
     if (!enabled || !await _gpsService.requestPermission()) return;
     final loc = await _gpsService.getCurrentLocation();
-    if (mounted && loc != null) {
+    if (!mounted) return;
+    if (loc != null) {
       setState(() => _currentPosition = LatLng(loc.latitude, loc.longitude));
     }
     _positionSubscription =
@@ -62,6 +63,8 @@ class _MapScreenState extends State<MapScreen> {
           final point = LatLng(position.latitude, position.longitude);
           setState(() => _currentPosition = point);
           _mapController.move(point, 16);
+        }, onError: (Object error) {
+          debugPrint('[MapScreen] GPS tracking unavailable: $error');
         });
   }
 

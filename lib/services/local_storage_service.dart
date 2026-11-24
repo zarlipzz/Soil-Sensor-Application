@@ -21,15 +21,21 @@ class LocalStorageService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final rawList = prefs.getStringList(prefKey);
-      if (rawList != null && rawList.isNotEmpty) {
-        return rawList
-            .map(
-              (str) => SoilMeasurement.fromJson(
-                jsonDecode(str) as Map<String, dynamic>,
-              ),
-            )
-            .toList();
+      final measurements = <SoilMeasurement>[];
+      var skipped = 0;
+      for (final raw in rawList ?? const <String>[]) {
+        try {
+          measurements.add(
+            SoilMeasurement.fromJson(jsonDecode(raw) as Map<String, dynamic>),
+          );
+        } catch (_) {
+          skipped++;
+        }
       }
+      if (skipped > 0) {
+        debugPrint('[LocalStorageService] Skipped $skipped unreadable logs.');
+      }
+      return measurements;
     } catch (e) {
       debugPrint('[LocalStorageService] Error loading local logs: $e');
     }
