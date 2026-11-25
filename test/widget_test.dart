@@ -39,7 +39,9 @@ void main() {
   testWidgets('SoilSensorApp smoke test and title verify', (WidgetTester tester) async {
     await tester.pumpWidget(const SoilSensorApp());
     expect(find.byType(SoilSensorApp), findsOneWidget);
-    expect(find.text(AppConstants.appSubtitle), findsOneWidget);
+    expect(find.text(AppConstants.appTitle), findsOneWidget);
+    expect(find.textContaining(AppConstants.sensorConnectionType), findsNothing);
+    expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 48);
   });
 
   testWidgets('phone cards keep labels, values and units clear in both orientations', (
@@ -67,6 +69,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final portrait = size.height > size.width;
+      expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 44);
       final button = find.byKey(
         ValueKey(portrait ? 'portrait-measure-button' : 'landscape-measure-button'),
       );
@@ -108,7 +111,10 @@ void main() {
     tester.view.physicalSize = const Size(1000, 600);
     await tester.pumpAndSettle();
     final tabletButton = find.byKey(const ValueKey('landscape-measure-button'));
-    expect(tester.getSize(tabletButton).width, 132);
+    final tabletButtonRect = tester.getRect(tabletButton);
+    expect(tabletButtonRect.size, const Size(132, 64));
+    expect(tabletButtonRect.center.dx, closeTo(500, 1));
+    expect(tabletButtonRect.bottom, closeTo(600 - 12, 1));
     expect(
       tester.widgetList<SensorCard>(find.byType(SensorCard)).every(
         (card) => !card.compact,
@@ -160,6 +166,7 @@ void main() {
     for (var count = 1; count <= 2; count++) {
       await tester.tap(button);
       await tester.pumpAndSettle();
+      expect(find.text(AppConstants.sensorConnectionType), findsOneWidget);
       if (count == 2) {
         expect(find.textContaining('กรุณาอนุญาตให้แอป'), findsOneWidget);
       }

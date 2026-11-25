@@ -624,31 +624,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final retry = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          content: Text(
-            switch (_usbStatus) {
-              UsbConnectionStatus.permissionDenied => context.tr(
-                'กรุณาอนุญาตให้แอปเข้าถึงเซนเซอร์ USB แล้วลองใหม่',
-                'Allow access to the USB sensor and try again.',
+          title: Text(context.tr('การเชื่อมต่อเซนเซอร์', 'Sensor connection')),
+          scrollable: true,
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                switch (_usbStatus) {
+                  UsbConnectionStatus.permissionDenied => context.tr(
+                    'กรุณาอนุญาตให้แอปเข้าถึงเซนเซอร์ USB แล้วลองใหม่',
+                    'Allow access to the USB sensor and try again.',
+                  ),
+                  UsbConnectionStatus.connectionFailed => context.tr(
+                    'เซนเซอร์ไม่ตอบสนอง กรุณาตรวจสายแล้วลองใหม่',
+                    'The sensor did not respond. Check the cable and try again.',
+                  ),
+                  UsbConnectionStatus.requestingPermission => context.tr(
+                    'กำลังรอการอนุญาต USB',
+                    'Waiting for USB permission.',
+                  ),
+                  UsbConnectionStatus.connecting ||
+                  UsbConnectionStatus.initializing ||
+                  UsbConnectionStatus.ready => context.tr(
+                    'กำลังเตรียมเซนเซอร์ กรุณารอสักครู่',
+                    'Preparing the sensor. Please wait.',
+                  ),
+                  UsbConnectionStatus.disconnected => context.tr(
+                    'ยังไม่ได้เชื่อมต่อเซนเซอร์ ตรวจสายหรือเปิด OTG ในการตั้งค่ามือถือ',
+                    'Sensor not detected. Check the OTG adapter or enable OTG in settings.',
+                  ),
+                },
               ),
-              UsbConnectionStatus.connectionFailed => context.tr(
-                'เซนเซอร์ไม่ตอบสนอง กรุณาตรวจสายแล้วลองใหม่',
-                'The sensor did not respond. Check the cable and try again.',
+              const SizedBox(height: 12),
+              Text(
+                AppConstants.sensorConnectionType,
+                style: Theme.of(dialogContext).textTheme.bodySmall,
               ),
-              UsbConnectionStatus.requestingPermission => context.tr(
-                'กำลังรอการอนุญาต USB',
-                'Waiting for USB permission.',
-              ),
-              UsbConnectionStatus.connecting ||
-              UsbConnectionStatus.initializing ||
-              UsbConnectionStatus.ready => context.tr(
-                'กำลังเตรียมเซนเซอร์ กรุณารอสักครู่',
-                'Preparing the sensor. Please wait.',
-              ),
-              UsbConnectionStatus.disconnected => context.tr(
-                'ยังไม่ได้เชื่อมต่อเซนเซอร์ ตรวจสายหรือเปิด OTG ในการตั้งค่ามือถือ',
-                'Sensor not detected. Check the OTG adapter or enable OTG in settings.',
-              ),
-            },
+            ],
           ),
           actions: [
             TextButton(
@@ -1331,13 +1344,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         titleSpacing: 8,
-        toolbarHeight: phone ? 48 : null,
+        toolbarHeight: phone ? 44 : 48,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: phone ? 29 : 34,
-              height: phone ? 29 : 34,
+              width: phone ? 26 : 30,
+              height: phone ? 26 : 30,
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.all(Radius.circular(6)),
@@ -1351,28 +1364,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(width: 8),
             Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    AppConstants.appTitle,
-                    style: AppFonts.manropeBold.copyWith(
-                      fontSize: phone ? 13 : 14,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    AppConstants.appSubtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppFonts.manrope.copyWith(
-                      fontSize: phone ? 9 : 10,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
+              child: Text(
+                AppConstants.appTitle,
+                style: AppFonts.manropeBold.copyWith(
+                  fontSize: phone ? 13 : 14,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],

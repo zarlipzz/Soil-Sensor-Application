@@ -37,8 +37,7 @@ class AppConstants {
   AppConstants._();
 
   static const String appTitle = 'Meta Soil';
-  static const String appSubtitle =
-      'CH340 USB Modbus RTU + Local Log & Data Hub';
+  static const String sensorConnectionType = 'CH340 USB · Modbus RTU';
 
   // Local storage keys
   static const String prefKeyLocationGroups = 'soil_location_groups_v1';

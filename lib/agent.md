@@ -1,6 +1,6 @@
 # Meta Soil working context
 
-Updated 2026-11-24 (Asia/Bangkok). The Android app is **1.5.7**, build **4**.
+Updated 2026-11-25 (Asia/Bangkok). The Android app is **1.6.0**, build **5**.
 
 ## Project
 
@@ -160,6 +160,7 @@ consolidated into the same Git commit.
 | Short landscape sheets, 20 Nov | Fixed the Local Log bottom overflow when the panel shrinks or the search keyboard opens. Added a short-screen export path so its action remains reachable. |
 | Meta Soil 1.5.5, 20 Nov | Set version `1.5.5+2`. Tried a white logo on a green circle, then switched to the full-color original on a white rounded square after visual review. Installed the final build and checked the app-bar logo on Galaxy Tab A9. These latest revisions are consolidated in `24bfd7e`. |
 | Meta Soil 1.5.7, 24 Nov | Set the bug-fix patch version to `1.5.7+4`. Limited the GPS wait when saving, isolated USB request timers, skipped corrupt local history rows, corrected date ordering in filters, and kept export selections after dismissing Android Share. |
+| Meta Soil 1.6, 25 Nov | Set the app version to `1.6.0+5`. Shortened the dashboard app bar and moved the hardware protocol details into the sensor connection dialog. Tried placing the tablet landscape measure button beside the name field before restoring its bottom-center position. |
 
 ## Main source files
 
